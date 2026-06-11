@@ -4,6 +4,7 @@ set -euo pipefail
 docker exec -it wetter-postgres psql -U weather -d weather -c "
 SELECT
   id,
+  source,
   device_id,
   received_at,
   temperature_c,
@@ -11,5 +12,5 @@ SELECT
   pressure_hpa
 FROM weather_readings
 ORDER BY id DESC
-LIMIT 10;
+LIMIT 15;
 "
