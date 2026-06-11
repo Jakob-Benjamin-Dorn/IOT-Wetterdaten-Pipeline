@@ -1,0 +1,19 @@
+apiVersion: 1
+
+datasources:
+  - name: Wetter PostgreSQL
+    uid: wetter-postgres
+    type: postgres
+    access: proxy
+    isDefault: true
+    url: wetter-postgres:5432
+    database: weather
+    user: weather
+
+    secureJsonData:
+      password: weather
+
+    jsonData:
+      sslmode: disable
+      postgresVersion: 1600
+      timescaledb: false
