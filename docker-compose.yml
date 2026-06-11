@@ -1,14 +1,16 @@
 services:
-  localstack:
-    image: localstack/localstack:latest
-    container_name: wetter-localstack
+  postgres:
+    image: postgres:16
+    container_name: wetter-postgres
     ports:
-      - "4568:4566"
+      - "5433:5432"
     environment:
-      - SERVICES=s3
-      - DEFAULT_REGION=eu-central-1
-      - AWS_ACCESS_KEY_ID=test
-      - AWS_SECRET_ACCESS_KEY=test
+      POSTGRES_DB: weather
+      POSTGRES_USER: weather
+      POSTGRES_PASSWORD: weather
     volumes:
-      - "./.localstack:/var/lib/localstack"
-      - "/var/run/docker.sock:/var/run/docker.sock"
+      - postgres-data:/var/lib/postgresql/data
+      - ./database/schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
+
+volumes:
+  postgres-data:

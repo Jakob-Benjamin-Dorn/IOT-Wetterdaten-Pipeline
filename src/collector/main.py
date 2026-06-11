@@ -8,9 +8,11 @@ from botocore.exceptions import ClientError
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
+from src.collector.database import StoredReading, insert_reading
+
 
 AWS_REGION = os.getenv("AWS_DEFAULT_REGION", "eu-central-1")
-LOCALSTACK_ENDPOINT = os.getenv("LOCALSTACK_ENDPOINT", "http://localhost:4568")
+LOCALSTACK_ENDPOINT = os.getenv("LOCALSTACK_ENDPOINT", "http://localhost:4566")
 RAW_BUCKET = os.getenv("RAW_BUCKET", "weather-raw")
 
 
@@ -92,6 +94,18 @@ def receive_reading(reading: SensorReading):
             status_code=500,
             detail=f"Could not write reading to S3: {exc}",
         ) from exc
+
+    insert_reading(
+        StoredReading(
+            device_id=reading.device_id,
+            received_at=received_at,
+            temperature_c=reading.temperature_c,
+            humidity_pct=reading.humidity_pct,
+            pressure_hpa=reading.pressure_hpa,
+            raw_s3_bucket=RAW_BUCKET,
+            raw_s3_key=s3_key,
+        )
+    )
 
     return {
         "status": "accepted",
