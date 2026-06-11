@@ -16,6 +16,15 @@ FastAPI Collector
                                    Grafana
 ```
 
+## Aktuelle Ordnerstruktur
+
+scripts/
+├── send-test-reading.sh          # sendet künstliche Sensordaten
+├── send-fallback-reading.sh      # sendet künstliche Fallback-Daten
+├── fetch-openweather-reading.py  # ruft echte OpenWeather-Daten ab
+├── show-latest-readings.sh       # zeigt letzte PostgreSQL-Zeilen
+└── list-raw-objects.sh           # zeigt Raw-Objekte in LocalStack S3
+
 ## Aktueller Projektstand
 
 Bereits umgesetzt:
