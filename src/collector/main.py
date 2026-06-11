@@ -20,7 +20,7 @@ app = FastAPI(title="Wetter IoT Collector")
 
 
 class FallbackWeatherReading(BaseModel):
-    temperature_c: float = Field(..., ge=-50, le=80)
+    temperature_c: float = Field(..., ge=-20, le=50)
     humidity_pct: float = Field(..., ge=0, le=100)
     pressure_hpa: float = Field(..., ge=800, le=1200)
     location: str = Field(default="local-openweather", max_length=120)
@@ -155,7 +155,7 @@ async def receive_reading(request: Request):
 def receive_fallback_reading(reading: FallbackWeatherReading):
     return store_reading(
         source="openweather",
-        device_id=f"openweather-{reading.location}",
+        device_id=reading.location,
         temperature_c=reading.temperature_c,
         humidity_pct=reading.humidity_pct,
         pressure_hpa=reading.pressure_hpa,
