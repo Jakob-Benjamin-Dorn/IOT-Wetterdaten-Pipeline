@@ -19,7 +19,7 @@ class StoredReading:
 
 def get_connection_string() -> str:
     host = os.getenv("POSTGRES_HOST", "localhost")
-    port = os.getenv("POSTGRES_PORT", "5432")
+    port = os.getenv("POSTGRES_PORT", "5433")
     db = os.getenv("POSTGRES_DB", "weather")
     user = os.getenv("POSTGRES_USER", "weather")
     password = os.getenv("POSTGRES_PASSWORD", "weather")
