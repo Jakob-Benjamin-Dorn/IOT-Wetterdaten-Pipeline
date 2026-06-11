@@ -42,17 +42,20 @@ def ensure_bucket_exists() -> None:
         )
 
 
-def build_s3_key(device_id: str, received_at: datetime) -> str:
+def build_s3_key(source: str, device_id: str, received_at: datetime) -> str:
+    timestamp = received_at.strftime("%Y%m%dT%H%M%SZ")
+    unique_id = uuid4()
+
     return (
-        "esp32_bme280/readings/"
+        f"raw_readings/"
+        f"source={source}/"
         f"device_id={device_id}/"
         f"year={received_at:%Y}/"
         f"month={received_at:%m}/"
         f"day={received_at:%d}/"
         f"hour={received_at:%H}/"
-        f"{received_at:%Y%m%dT%H%M%SZ}-{uuid4()}.json"
+        f"{timestamp}-{unique_id}.json"
     )
-
 
 @app.on_event("startup")
 def startup() -> None:
@@ -74,7 +77,7 @@ def store_reading(
     payload: dict,
 ):
     received_at = datetime.now(timezone.utc)
-    s3_key = build_s3_key(device_id, received_at)
+    s3_key = build_s3_key(source, device_id, received_at)
 
     raw_record = {
         "received_at": received_at.isoformat(),
