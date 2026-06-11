@@ -6,9 +6,9 @@ COLLECTOR_URL="${COLLECTOR_URL:-http://localhost:8088/readings}"
 curl -sS -X POST "$COLLECTOR_URL" \
   -H "Content-Type: application/json" \
   -d '{
-    "device_id": "test-device-01",
+    "device_id": "test-data",
     "temperature_c": 22.5,
-    "humidity_pct": 45.0,
+    "humidity_pct": 33.0,
     "pressure_hpa": 1013.2
   }'
 

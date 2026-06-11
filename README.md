@@ -16,6 +16,15 @@ FastAPI Collector
                                    Grafana
 ```
 
+## Aktuelle Ordnerstruktur
+
+scripts/
+├── send-test-reading.sh          # sendet künstliche Sensordaten
+├── send-fallback-reading.sh      # sendet künstliche Fallback-Daten
+├── fetch-openweather-reading.py  # ruft echte OpenWeather-Daten ab
+├── show-latest-readings.sh       # zeigt letzte PostgreSQL-Zeilen
+└── list-raw-objects.sh           # zeigt Raw-Objekte in LocalStack S3
+
 ## Aktueller Projektstand
 
 Bereits umgesetzt:
@@ -28,11 +37,11 @@ Bereits umgesetzt:
 * Validierte Messwerte werden in PostgreSQL gespeichert.
 * Grafana wird lokal per Docker gestartet.
 * PostgreSQL-Datenquelle und Dashboard werden automatisch in Grafana provisioniert.
+* OpenWeather-Fallback
+* GitHub Actions
 
 Noch nicht umgesetzt:
 
-* OpenWeather-Fallback
-* GitHub Actions
 * Terraform
 * AWS-Deployment
 * Amazon RDS
@@ -93,7 +102,7 @@ Der Collector erwartet aktuell dieses Format:
 Gültigkeitsbereiche:
 
 ```text
-temperature_c: -50 bis 80
+temperature_c: -20 bis 50
 humidity_pct: 0 bis 100
 pressure_hpa: 800 bis 1200
 ```
@@ -223,7 +232,7 @@ Erwartete Antwort:
 Ohne echten Sensor:
 
 ```bash
-./scripts/send-test-reading.sh
+./scripts/dev/send-test-reading.sh
 ```
 
 Alternativ per curl:
@@ -242,7 +251,7 @@ curl -X POST http://localhost:8088/readings \
 ## PostgreSQL prüfen
 
 ```bash
-./scripts/show-latest-readings.sh
+./scripts/dev/show-latest-readings.sh
 ```
 
 Oder direkt:
@@ -261,7 +270,7 @@ Wenn AWS CLI installiert ist:
 
 ```bash
 source .env
-./scripts/list-raw-objects.sh
+./scripts/dev/list-raw-objects.sh
 ```
 
 Oder direkt:

@@ -6,7 +6,8 @@ from uuid import uuid4
 import boto3
 from botocore.exceptions import ClientError
 from fastapi import FastAPI, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import ValidationError
+from src.collector.models import FallbackWeatherReading, SensorReading
 
 from src.collector.database import StoredReading, insert_reading
 
@@ -17,13 +18,6 @@ RAW_BUCKET = os.getenv("RAW_BUCKET", "weather-raw")
 
 
 app = FastAPI(title="Wetter IoT Collector")
-
-
-class FallbackWeatherReading(BaseModel):
-    temperature_c: float = Field(..., ge=-20, le=50)
-    humidity_pct: float = Field(..., ge=0, le=100)
-    pressure_hpa: float = Field(..., ge=800, le=1200)
-    location: str = Field(default="local-openweather", max_length=120)
 
 
 def get_s3_client():
@@ -122,6 +116,7 @@ def store_reading(
         "key": s3_key,
     }
 
+
 @app.post("/readings", status_code=202)
 @app.post("/sensor-readings", status_code=202)
 async def receive_reading(request: Request):
@@ -133,12 +128,15 @@ async def receive_reading(request: Request):
             detail=f"Invalid JSON body: {exc}",
         ) from exc
 
+    print("Received payload:", payload)
+
     try:
-        reading = SensorReading(**payload)
-    except Exception as exc:
+        reading = SensorReading.model_validate(payload)
+    except ValidationError as exc:
+        print(f"Invalid sensor payload: {exc}")
         raise HTTPException(
             status_code=422,
-            detail=f"Invalid sensor payload: {exc}",
+            detail=exc.errors(),
         ) from exc
 
     return store_reading(
