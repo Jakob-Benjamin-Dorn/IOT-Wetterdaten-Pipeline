@@ -5,7 +5,7 @@ from uuid import uuid4
 
 import boto3
 from botocore.exceptions import ClientError
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from src.collector.database import StoredReading, insert_reading
@@ -71,7 +71,25 @@ def health():
 
 
 @app.post("/readings", status_code=202)
-def receive_reading(reading: SensorReading):
+@app.post("/sensor-readings", status_code=202)
+async def receive_reading(request: Request):
+    try:
+        payload = await request.json()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid JSON body: {exc}",
+        ) from exc
+
+    print("Received payload:", payload)
+
+    try:
+        reading = SensorReading(**payload)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid sensor payload: {exc}",
+        ) from exc
     received_at = datetime.now(timezone.utc)
     s3_key = build_s3_key(reading.device_id, received_at)
 
