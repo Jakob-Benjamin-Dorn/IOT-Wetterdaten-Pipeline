@@ -1,0 +1,204 @@
+{
+    "id": null,
+    "uid": "iot-wetterstation",
+    "title": "IoT-Wetterstation",
+    "tags": [
+        "iot",
+        "wetter",
+        "esp32",
+        "bme280"
+    ],
+    "timezone": "browser",
+    "schemaVersion": 39,
+    "version": 1,
+    "refresh": "30s",
+    "time": {
+        "from": "now-6h",
+        "to": "now"
+    },
+    "panels": [
+        {
+            "id": 1,
+            "type": "text",
+            "title": "\u00dcbersicht",
+            "gridPos": {
+                "x": 0,
+                "y": 0,
+                "w": 24,
+                "h": 5
+            },
+            "options": {
+                "mode": "markdown",
+                "content": "# IoT-Wetterstation\n\nKarlsruhe-Gr\u00fcnwinkel-Wetterdaten als Near-Realtime-Messungen vom ESP32-C6-Zero mit BME280-Sensor.\n\nGemessen werden Temperatur, Luftfeuchtigkeit und Luftdruck. Die Rohdaten werden lokal in LocalStack-S3 archiviert und validierte Messwerte in PostgreSQL gespeichert."
+            }
+        },
+        {
+            "id": 2,
+            "type": "stat",
+            "title": "Letzte Messwerte",
+            "datasource": {
+                "type": "postgres",
+                "uid": "wetter-postgres"
+            },
+            "gridPos": {
+                "x": 0,
+                "y": 5,
+                "w": 24,
+                "h": 6
+            },
+            "targets": [
+                {
+                    "refId": "A",
+                    "format": "table",
+                    "rawQuery": true,
+                    "rawSql": "SELECT\n  temperature_c AS \"Temperatur \u00b0C\",\n  humidity_pct AS \"Luftfeuchtigkeit %\",\n  pressure_hpa AS \"Luftdruck hPa\"\nFROM weather_readings\nORDER BY received_at DESC\nLIMIT 1;"
+                }
+            ],
+            "options": {
+                "reduceOptions": {
+                    "values": false,
+                    "calcs": [
+                        "lastNotNull"
+                    ],
+                    "fields": ""
+                },
+                "orientation": "auto",
+                "textMode": "value_and_name",
+                "colorMode": "value",
+                "graphMode": "area",
+                "justifyMode": "auto"
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            {
+                                "color": "green",
+                                "value": null
+                            }
+                        ]
+                    }
+                },
+                "overrides": []
+            }
+        },
+        {
+            "id": 3,
+            "type": "timeseries",
+            "title": "Temperaturverlauf",
+            "datasource": {
+                "type": "postgres",
+                "uid": "wetter-postgres"
+            },
+            "gridPos": {
+                "x": 0,
+                "y": 11,
+                "w": 8,
+                "h": 8
+            },
+            "targets": [
+                {
+                    "refId": "A",
+                    "format": "time_series",
+                    "rawQuery": true,
+                    "rawSql": "SELECT\n  received_at AS \"time\",\n  temperature_c AS \"Temperatur \u00b0C\"\nFROM weather_readings\nWHERE $__timeFilter(received_at)\nORDER BY received_at;"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "celsius"
+                },
+                "overrides": []
+            },
+            "options": {
+                "legend": {
+                    "displayMode": "list",
+                    "placement": "bottom"
+                },
+                "tooltip": {
+                    "mode": "single",
+                    "sort": "none"
+                }
+            }
+        },
+        {
+            "id": 4,
+            "type": "timeseries",
+            "title": "Luftfeuchtigkeit",
+            "datasource": {
+                "type": "postgres",
+                "uid": "wetter-postgres"
+            },
+            "gridPos": {
+                "x": 8,
+                "y": 11,
+                "w": 8,
+                "h": 8
+            },
+            "targets": [
+                {
+                    "refId": "A",
+                    "format": "time_series",
+                    "rawQuery": true,
+                    "rawSql": "SELECT\n  received_at AS \"time\",\n  humidity_pct AS \"Luftfeuchtigkeit %\"\nFROM weather_readings\nWHERE $__timeFilter(received_at)\nORDER BY received_at;"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "humidity"
+                },
+                "overrides": []
+            },
+            "options": {
+                "legend": {
+                    "displayMode": "list",
+                    "placement": "bottom"
+                },
+                "tooltip": {
+                    "mode": "single",
+                    "sort": "none"
+                }
+            }
+        },
+        {
+            "id": 5,
+            "type": "timeseries",
+            "title": "Luftdruck",
+            "datasource": {
+                "type": "postgres",
+                "uid": "wetter-postgres"
+            },
+            "gridPos": {
+                "x": 16,
+                "y": 11,
+                "w": 8,
+                "h": 8
+            },
+            "targets": [
+                {
+                    "refId": "A",
+                    "format": "time_series",
+                    "rawQuery": true,
+                    "rawSql": "SELECT\n  received_at AS \"time\",\n  pressure_hpa AS \"Luftdruck hPa\"\nFROM weather_readings\nWHERE $__timeFilter(received_at)\nORDER BY received_at;"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "pressurehpa"
+                },
+                "overrides": []
+            },
+            "options": {
+                "legend": {
+                    "displayMode": "list",
+                    "placement": "bottom"
+                },
+                "tooltip": {
+                    "mode": "single",
+                    "sort": "none"
+                }
+            }
+        }
+    ]
+}

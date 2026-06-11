@@ -1,14 +1,32 @@
 services:
-  localstack:
-    image: localstack/localstack:latest
-    container_name: wetter-localstack
+  postgres:
+    image: postgres:16
+    container_name: wetter-postgres
     ports:
-      - "4568:4566"
+      - "5433:5432"
     environment:
-      - SERVICES=s3
-      - DEFAULT_REGION=eu-central-1
-      - AWS_ACCESS_KEY_ID=test
-      - AWS_SECRET_ACCESS_KEY=test
+      POSTGRES_DB: weather
+      POSTGRES_USER: weather
+      POSTGRES_PASSWORD: weather
     volumes:
-      - "./.localstack:/var/lib/localstack"
-      - "/var/run/docker.sock:/var/run/docker.sock"
+      - postgres-data:/var/lib/postgresql/data
+      - ./database/schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
+
+  grafana:
+    image: grafana/grafana-oss:latest
+    container_name: wetter-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/etc/grafana/dashboards:ro
+    depends_on:
+      - postgres
+
+volumes:
+  postgres-data:
+  grafana-data:
