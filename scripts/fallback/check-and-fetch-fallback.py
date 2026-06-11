@@ -6,6 +6,9 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(PROJECT_ROOT))
+
 import psycopg
 
 from src.collector.fallback import should_use_fallback
@@ -39,6 +42,16 @@ def get_latest_sensor_timestamp():
         return None
 
     return row[0]
+
+
+def run_openweather_fetch() -> None:
+    script_path = PROJECT_ROOT / "scripts" / "fallback" / "fetch-openweather-reading.py"
+
+    if not script_path.exists():
+        print(f"OpenWeather-Skript nicht gefunden: {script_path}", file=sys.stderr)
+        sys.exit(1)
+
+    subprocess.run([sys.executable, str(script_path)], check=True)
 
 
 def main() -> None:
