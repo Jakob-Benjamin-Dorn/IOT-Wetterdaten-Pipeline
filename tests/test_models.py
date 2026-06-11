@@ -25,7 +25,7 @@ def test_sensor_reading_rejects_unrealistic_temperature():
         SensorReading.model_validate(
             {
                 "device_id": "esp32-c6-window-01",
-                "temperature_c": 182.6,
+                "temperature_c": -25.6,
                 "humidity_pct": 45.0,
                 "pressure_hpa": 1013.2,
             }
