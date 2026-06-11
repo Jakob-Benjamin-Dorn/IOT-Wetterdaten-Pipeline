@@ -7,6 +7,7 @@ import psycopg
 
 @dataclass
 class StoredReading:
+    source: str
     device_id: str
     received_at: datetime
     temperature_c: float
@@ -29,6 +30,7 @@ def get_connection_string() -> str:
 def insert_reading(reading: StoredReading) -> None:
     sql = """
         INSERT INTO weather_readings (
+            source,
             device_id,
             received_at,
             temperature_c,
@@ -37,7 +39,7 @@ def insert_reading(reading: StoredReading) -> None:
             raw_s3_bucket,
             raw_s3_key
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
     """
 
     with psycopg.connect(get_connection_string()) as conn:
@@ -45,6 +47,7 @@ def insert_reading(reading: StoredReading) -> None:
             cur.execute(
                 sql,
                 (
+                    reading.source,
                     reading.device_id,
                     reading.received_at,
                     reading.temperature_c,

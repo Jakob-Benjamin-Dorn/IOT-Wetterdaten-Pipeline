@@ -115,6 +115,7 @@ async def receive_reading(request: Request):
 
     insert_reading(
         StoredReading(
+            source="sensor",
             device_id=reading.device_id,
             received_at=received_at,
             temperature_c=reading.temperature_c,
