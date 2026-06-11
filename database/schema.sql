@@ -1,6 +1,7 @@
 CREATE TABLE IF NOT EXISTS weather_readings (
     id BIGSERIAL PRIMARY KEY,
 
+    source TEXT NOT NULL DEFAULT 'sensor',
     device_id TEXT NOT NULL,
     received_at TIMESTAMPTZ NOT NULL,
 

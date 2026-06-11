@@ -7,13 +7,14 @@ datasources:
     access: proxy
     isDefault: true
     url: wetter-postgres:5432
-    database: weather
     user: weather
-
-    secureJsonData:
-      password: weather
+    database: weather
 
     jsonData:
+      database: weather
       sslmode: disable
       postgresVersion: 1600
       timescaledb: false
+
+    secureJsonData:
+      password: weather

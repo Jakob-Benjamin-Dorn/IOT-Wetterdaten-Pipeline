@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+docker exec -it wetter-postgres psql -U weather -d weather -c "
+SELECT
+  id,
+  device_id,
+  received_at,
+  temperature_c,
+  humidity_pct,
+  pressure_hpa
+FROM weather_readings
+ORDER BY id DESC
+LIMIT 10;
+"

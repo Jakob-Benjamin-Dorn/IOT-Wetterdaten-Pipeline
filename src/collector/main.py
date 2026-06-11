@@ -5,7 +5,7 @@ from uuid import uuid4
 
 import boto3
 from botocore.exceptions import ClientError
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from src.collector.database import StoredReading, insert_reading
@@ -19,11 +19,11 @@ RAW_BUCKET = os.getenv("RAW_BUCKET", "weather-raw")
 app = FastAPI(title="Wetter IoT Collector")
 
 
-class SensorReading(BaseModel):
-    device_id: str = Field(..., min_length=1, max_length=80)
-    temperature_c: float = Field(..., ge=-50, le=80)
+class FallbackWeatherReading(BaseModel):
+    temperature_c: float = Field(..., ge=-20, le=50)
     humidity_pct: float = Field(..., ge=0, le=100)
     pressure_hpa: float = Field(..., ge=800, le=1200)
+    location: str = Field(default="local-openweather", max_length=120)
 
 
 def get_s3_client():
@@ -70,15 +70,22 @@ def health():
     return {"status": "ok"}
 
 
-@app.post("/readings", status_code=202)
-def receive_reading(reading: SensorReading):
+def store_reading(
+    *,
+    source: str,
+    device_id: str,
+    temperature_c: float,
+    humidity_pct: float,
+    pressure_hpa: float,
+    payload: dict,
+):
     received_at = datetime.now(timezone.utc)
-    s3_key = build_s3_key(reading.device_id, received_at)
+    s3_key = build_s3_key(device_id, received_at)
 
     raw_record = {
         "received_at": received_at.isoformat(),
-        "source": "esp32_bme280",
-        "payload": reading.model_dump(),
+        "source": source,
+        "payload": payload,
     }
 
     try:
@@ -97,11 +104,12 @@ def receive_reading(reading: SensorReading):
 
     insert_reading(
         StoredReading(
-            device_id=reading.device_id,
+            source=source,
+            device_id=device_id,
             received_at=received_at,
-            temperature_c=reading.temperature_c,
-            humidity_pct=reading.humidity_pct,
-            pressure_hpa=reading.pressure_hpa,
+            temperature_c=temperature_c,
+            humidity_pct=humidity_pct,
+            pressure_hpa=pressure_hpa,
             raw_s3_bucket=RAW_BUCKET,
             raw_s3_key=s3_key,
         )
@@ -109,6 +117,47 @@ def receive_reading(reading: SensorReading):
 
     return {
         "status": "accepted",
+        "source": source,
         "bucket": RAW_BUCKET,
         "key": s3_key,
     }
+
+@app.post("/readings", status_code=202)
+@app.post("/sensor-readings", status_code=202)
+async def receive_reading(request: Request):
+    try:
+        payload = await request.json()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid JSON body: {exc}",
+        ) from exc
+
+    try:
+        reading = SensorReading(**payload)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid sensor payload: {exc}",
+        ) from exc
+
+    return store_reading(
+        source="sensor",
+        device_id=reading.device_id,
+        temperature_c=reading.temperature_c,
+        humidity_pct=reading.humidity_pct,
+        pressure_hpa=reading.pressure_hpa,
+        payload=payload,
+    )
+
+
+@app.post("/fallback-readings", status_code=202)
+def receive_fallback_reading(reading: FallbackWeatherReading):
+    return store_reading(
+        source="openweather",
+        device_id=reading.location,
+        temperature_c=reading.temperature_c,
+        humidity_pct=reading.humidity_pct,
+        pressure_hpa=reading.pressure_hpa,
+        payload=reading.model_dump(),
+    )
