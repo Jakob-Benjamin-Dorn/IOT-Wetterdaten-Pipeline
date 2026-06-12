@@ -17,3 +17,8 @@ output "collector_lambda_arn" {
   description = "ARN of the collector Lambda function."
   value       = aws_lambda_function.collector.arn
 }
+
+output "collector_api_endpoint" {
+  description = "HTTP API endpoint for the collector."
+  value       = aws_apigatewayv2_api.collector.api_endpoint
+}
