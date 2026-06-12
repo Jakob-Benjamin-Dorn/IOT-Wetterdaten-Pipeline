@@ -2,11 +2,11 @@
 
 [![CI](https://github.com/Jakob-Benjamin-Dorn/IOT-Wetterdaten-Pipeline/actions/workflows/tests.yml/badge.svg)](https://github.com/Jakob-Benjamin-Dorn/IOT-Wetterdaten-Pipeline/actions/workflows/tests.yml)
 
-Lokales Portfolio-Projekt für eine kleine IoT-Wetterstation.
+Portfolio-Projekt für eine kleine IoT-Wetterstation mit lokalem Entwicklungsstack und erster AWS-Cloud-Ingestion.
 
-Ein ESP32-C6-Zero mit BME280-Sensor misst Temperatur, Luftfeuchtigkeit und Luftdruck und sendet die Messwerte per HTTP an einen FastAPI-Collector. Der Collector speichert die Rohdaten in einem S3-kompatiblen Raw-Archiv über LocalStack und legt die validierten Messwerte zusätzlich in PostgreSQL ab. Grafana visualisiert die Messwerte aus PostgreSQL.
+Ein ESP32-C6-Zero mit BME280-Sensor misst Temperatur, Luftfeuchtigkeit und Luftdruck und sendet die Messwerte per HTTP. Lokal nimmt ein FastAPI-Collector die Messwerte entgegen, speichert die Rohdaten in einem S3-kompatiblen Raw-Archiv über LocalStack und legt die validierten Messwerte zusätzlich in PostgreSQL ab. Grafana visualisiert die Messwerte aus PostgreSQL.
 
-Zusätzlich kann eine OpenWeather-basierte Fallback-Quelle genutzt werden, wenn längere Zeit keine aktuellen Sensordaten eintreffen.
+Zusätzlich kann eine OpenWeather-basierte Fallback-Quelle genutzt werden, wenn längere Zeit keine aktuellen Sensordaten eintreffen. In AWS ist inzwischen ein schlanker Cloud-Ingestion-MVP vorhanden: API Gateway nimmt HTTP-Requests entgegen, eine Lambda validiert die Messwerte, prüft einen Header-Token und speichert valide Raw-Payloads in einem echten S3 Raw Bucket.
 
 ## Aktueller Datenfluss
 
@@ -28,13 +28,25 @@ FastAPI Collector
                                    Grafana
 ```
 
+Erster Cloud-MVP:
+
+```text
+ESP32-C6-Zero + BME280 / curl
+        ↓ HTTP POST mit X-Collector-Token
+API Gateway HTTP API
+        ↓ Lambda Proxy Integration
+Lambda Collector
+        └── Raw JSON → Amazon S3 Raw Bucket
+```
+
 ## Aktuelle Ordnerstruktur
 
 ```text
 src/collector/
 ├── main.py            # FastAPI-Adapter für den lokalen HTTP-Collector
-├── lambda_handler.py  # vorbereiteter Lambda-Adapter für späteres API-Gateway/Lambda-Deployment
-├── ingestion.py       # eigentliche Ingestion-/Speicherlogik
+├── lambda_handler.py  # Lambda-Adapter für den AWS-Cloud-Ingestion-Pfad
+├── raw_storage.py     # S3-Raw-Speicherung ohne PostgreSQL-Abhängigkeit
+├── ingestion.py       # lokale Ingestion: S3 Raw JSON + PostgreSQL
 ├── models.py          # Pydantic-Validierung der Messwerte
 ├── database.py        # PostgreSQL-Zugriff
 ├── config.py          # zentrale Laufzeitkonfiguration über ENV-Variablen
@@ -53,6 +65,17 @@ scripts/fallback/
 ├── check-and-fetch-fallback.py   # prüft, ob der Sensor zu alt ist, und löst ggf. OpenWeather aus
 └── run-fallback-check-loop.sh    # führt die Fallback-Prüfung lokal regelmäßig aus
 
+scripts/cloud/
+├── send-cloud-test-reading.sh    # sendet eine Testmessung an API Gateway/Lambda
+└── list-cloud-raw-objects.sh     # zeigt Raw-Objekte im echten AWS-S3-Bucket
+
+hardware/esp32-wetterstation/
+├── esp32-wetterstation.ino       # ESP32-C6/BME280-Sketch mit lokalem und Cloud-Ziel
+└── secrets.example.h             # Vorlage für WLAN, URLs und Cloud-Token
+
+infra/dev/
+└── Terraform-Konfiguration für die aktuelle AWS-Dev-Umgebung
+
 tests/
 ├── test_config.py
 ├── test_fallback.py
@@ -61,21 +84,16 @@ tests/
 └── test_models.py
 ```
 
-aktualisieren:
-raw_storage.py  = nur S3 Raw JSON
-ingestion.py    = S3 Raw JSON + PostgreSQL
-lambda_handler.py → nutzt raw_storage.py
-main.py         → nutzt ingestion.py
-
 ## Aktueller Projektstand
 
 Bereits umgesetzt:
 
-* ESP32 sendet Messwerte per HTTP POST.
+* ESP32 sendet Messwerte per HTTP POST lokal und optional in die AWS-Cloud.
+* Der ESP32-Sketch kann über `USE_CLOUD` zwischen lokalem Collector und Cloud-Endpunkt umschalten.
 * FastAPI nimmt Messwerte entgegen.
 * Der Collector akzeptiert `/readings` und `/sensor-readings`.
 * Messwerte werden validiert.
-* Rohdaten werden in LocalStack S3 gespeichert.
+* Rohdaten werden lokal in LocalStack S3 gespeichert.
 * Validierte Messwerte werden in PostgreSQL gespeichert.
 * Die Datenquelle wird über die Spalte `source` unterschieden (`sensor`, `openweather`).
 * Grafana wird lokal per Docker Compose gestartet.
@@ -86,14 +104,19 @@ Bereits umgesetzt:
 * LocalStack, PostgreSQL, Grafana und Collector können gemeinsam per Docker Compose gestartet werden.
 * Unit-Tests laufen mit `pytest`.
 * GitHub Actions führt die Unit-Tests bei Push/Pull Request aus.
-* Ein Lambda-Adapter ist als Cloud-Readiness-Vorbereitung vorhanden, aber noch nicht deployed.
+* Die Raw-S3-Speicherung ist von der PostgreSQL-Ingestion getrennt.
+* Terraform verwaltet die aktuelle AWS-Dev-Umgebung.
+* Ein echter S3 Raw Bucket ist in AWS angelegt.
+* API Gateway und Lambda sind als Cloud-Ingestion-MVP deployed.
+* Der Cloud-Endpunkt ist über `X-Collector-Token` abgesichert.
+* Ein echter ESP32 kann Messwerte an API Gateway/Lambda senden, die im AWS-S3-Raw-Bucket landen.
 
 Noch nicht umgesetzt:
 
-* Terraform
-* AWS-Deployment
-* Amazon RDS
-* API Gateway / Lambda Deployment
+* Amazon RDS PostgreSQL für normalisierte Cloud-Messwerte
+* Lambda-Schreibpfad von Raw S3 zusätzlich nach RDS
+* Quarantine-Ablage für ungültige oder unerwartete Payloads
+* Cloud-Fallback über OpenWeather/EventBridge
 * Deployment von Grafana auf ECS/EC2
 * stabile öffentliche Domain für den Sensor
 * AWS IoT Core / MQTT
@@ -137,7 +160,7 @@ VCC → 3V3
 GND → GND
 ```
 
-Der Sensor sendet aktuell ungefähr alle 30 Sekunden. Für die spätere Demo ist ein Intervall von 60 Sekunden vorgesehen.
+Der Sensor sendet für die Demo typischerweise ungefähr alle 60 Sekunden. Das Intervall wird im ESP32-Sketch über `SEND_INTERVAL_MS` gesteuert.
 
 ## Erwartetes Sensor-JSON
 
@@ -523,6 +546,49 @@ Der Collector akzeptiert aktuell beide Pfade:
 /sensor-readings
 ```
 
+## ESP32-Sketch lokal oder Cloud nutzen
+
+Der Sketch liegt unter:
+
+```text
+hardware/esp32-wetterstation/esp32-wetterstation.ino
+```
+
+Die Datei `secrets.h` liegt lokal im gleichen Ordner, enthält WLAN-Daten, URLs und den Cloud-Token und wird nicht committed. Als Vorlage dient:
+
+```text
+hardware/esp32-wetterstation/secrets.example.h
+```
+
+Wichtige Einstellung:
+
+```cpp
+#define USE_CLOUD false
+```
+
+Mit `false` sendet der ESP32 an den lokalen FastAPI-Collector. Mit `true` sendet er an API Gateway/Lambda in AWS.
+
+Für lokale Tests muss die URL auf die LAN-IP des Rechners zeigen, nicht auf `localhost`:
+
+```cpp
+#define LOCAL_COLLECTOR_URL "http://192.168.0.248:8088/sensor-readings"
+```
+
+Für Cloud-Tests wird der API-Gateway-Endpunkt mit Pfad verwendet:
+
+```cpp
+#define CLOUD_COLLECTOR_URL "https://<api-id>.execute-api.eu-central-1.amazonaws.com/sensor-readings"
+```
+
+Der Cloud-Endpunkt erwartet zusätzlich diesen Header:
+
+```text
+X-Collector-Token: <token>
+```
+
+Der Token steht lokal in `secrets.h` als `CLOUD_COLLECTOR_TOKEN`. Er ist nicht identisch mit AWS-Zugangsdaten und darf nicht ins Git-Repository.
+
+
 ## Lokale Ports
 
 | Dienst                    | Port |
@@ -626,7 +692,7 @@ Der erste AWS-MVP nimmt Wetterdaten per HTTP entgegen und speichert die Raw-Payl
 Datenfluss:
 
 ```text
-curl / später ESP32
+curl / ESP32-C6 + BME280
   → API Gateway HTTP API
   → Lambda Collector
   → S3 Raw Bucket
@@ -634,9 +700,89 @@ curl / später ESP32
 
 Der Endpunkt ist mit einem einfachen Header-Token geschützt:
 
-```
+```text
 X-Collector-Token: <token>
 ```
+
+Die Cloud-URL kann aus Terraform gelesen werden:
+
+```bash
+cd infra/dev
+terraform output -raw collector_api_endpoint
+```
+
+Für Requests muss der Pfad ergänzt werden:
+
+```text
+/sensor-readings
+```
+
+Cloud-Smoke-Test:
+
+```bash
+export AWS_PROFILE=iot-dev
+export COLLECTOR_TOKEN=<collector-token>
+
+./scripts/cloud/send-cloud-test-reading.sh
+./scripts/cloud/list-cloud-raw-objects.sh
+```
+
+Alternativ direkt prüfen:
+
+```bash
+aws s3 ls \
+  s3://<raw-bucket-name>/raw_readings/ \
+  --recursive \
+  --profile iot-dev
+```
+
+Die aktuelle Cloud-Ingestion speichert bewusst nur Raw JSON in S3. Normalisierte Messwerte werden in der Cloud erst im nächsten Meilenstein zusätzlich nach Amazon RDS geschrieben.
+
+## RDS-Milestone: normalisierte Cloud-Messwerte
+
+Der nächste geplante Ausbauschritt ist Amazon RDS PostgreSQL für normalisierte Messwerte.
+
+Geplanter Datenfluss:
+
+```text
+ESP32 / OpenWeather
+  → API Gateway / Lambda
+  → S3 Raw Bucket
+  → RDS PostgreSQL weather_readings
+```
+
+S3 bleibt die vollständige Raw-Ablage. RDS enthält nur die für Dashboard und Abfragen benötigten Spalten:
+
+```text
+source
+device_id
+received_at
+temperature_c
+humidity_pct
+pressure_hpa
+raw_s3_bucket
+raw_s3_key
+```
+
+Ein zusätzlicher `processed` Bucket ist vorerst nicht geplant, weil die Messwerte bereits strukturiert und nah am finalen Tabellenmodell ankommen. Fehlerhafte oder unerwartete Payloads können später optional in einen `quarantine`-Prefix oder separaten Quarantine-Bucket geschrieben werden.
+
+OpenWeather liefert ein größeres JSON als der Sensor. Das vollständige OpenWeather-JSON gehört in die Raw-Ablage. Für RDS werden daraus nur die normalisierten Felder `temperature_c`, `humidity_pct` und `pressure_hpa` plus Metadaten übernommen.
+
+### Kosten- und Destroy-Hinweis für AWS-Dev
+
+Der aktuelle Cloud-MVP mit API Gateway, Lambda und S3 verursacht ohne Traffic nur sehr geringe bzw. nutzungsabhängige Kosten. RDS ist dagegen eine dauerhaft laufende Datenbankressource und sollte in der Dev-Umgebung nicht unnötig über Nacht laufen.
+
+Vor längeren Pausen kann die Dev-Umgebung zerstört werden:
+
+```bash
+cd infra/dev
+export AWS_PROFILE=iot-dev
+terraform plan -destroy
+terraform destroy
+```
+
+Achtung: `terraform destroy` entfernt alle von dieser Terraform-Konfiguration verwalteten Ressourcen. Dazu gehören aktuell auch API Gateway, Lambda und der S3 Raw Bucket. Raw-Daten im S3 Bucket gehen dabei verloren, sofern sie vorher nicht gesichert wurden.
+
 
 ## Future Work
 
