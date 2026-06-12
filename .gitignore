@@ -16,3 +16,10 @@ __pycache__/
 .localstack/
 postgres-data/
 grafana-data/
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!.tfvars.example
