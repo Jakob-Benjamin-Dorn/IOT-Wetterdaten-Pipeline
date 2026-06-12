@@ -1,0 +1,2 @@
+class CollectorStorageError(RuntimeError):
+    pass

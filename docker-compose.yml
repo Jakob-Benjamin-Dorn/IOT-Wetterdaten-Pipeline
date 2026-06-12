@@ -27,6 +27,53 @@ services:
     depends_on:
       - postgres
 
+  collector:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: wetter-collector
+    ports:
+      - "8088:8088"
+    environment:
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_DEFAULT_REGION: eu-central-1
+
+      LOCALSTACK_ENDPOINT: http://localstack:4566
+      RAW_BUCKET: weather-raw
+
+      POSTGRES_HOST: wetter-postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: weather
+      POSTGRES_USER: weather
+      POSTGRES_PASSWORD: weather
+    depends_on:
+      postgres:
+        condition: service_started
+      localstack:
+        condition: service_healthy
+
+  localstack:
+    image: localstack/localstack:latest
+    container_name: wetter-localstack
+    ports:
+      - "4566:4566"
+    environment:
+      SERVICES: s3
+      AWS_DEFAULT_REGION: eu-central-1
+      LOCALSTACK_AUTH_TOKEN: ${LOCALSTACK_AUTH_TOKEN:-}
+    volumes:
+      - localstack-data:/var/lib/localstack
+      - /var/run/docker.sock:/var/run/docker.sock
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+
+
 volumes:
   postgres-data:
   grafana-data:
+  localstack-data:
