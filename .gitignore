@@ -29,3 +29,6 @@ build/
 
 # AWS CLI-Test
 events/lambda-sensor-reading.json
+
+# ESP32 local secrets
+hardware/esp32-wetterstation/secrets.h

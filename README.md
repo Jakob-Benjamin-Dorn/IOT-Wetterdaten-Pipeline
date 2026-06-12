@@ -619,6 +619,25 @@ Diese Infrastruktur kann pro Umgebung aufgebaut, angepasst und bei Bedarf zerst�
 
 S3 und RDS enthalten Daten und sollten trotz Terraform-Verwaltung nicht unbedacht gelöscht werden. Später sollten dafür Schutzmechanismen wie S3 Versioning, RDS Backups und bewusste Destroy-Regeln verwendet werden.
 
+## Cloud-Ingestion MVP
+
+Der erste AWS-MVP nimmt Wetterdaten per HTTP entgegen und speichert die Raw-Payloads in S3.
+
+Datenfluss:
+
+```text
+curl / später ESP32
+  → API Gateway HTTP API
+  → Lambda Collector
+  → S3 Raw Bucket
+```
+
+Der Endpunkt ist mit einem einfachen Header-Token geschützt:
+
+```
+X-Collector-Token: <token>
+```
+
 ## Future Work
 
 Mögliche spätere Erweiterungen:
