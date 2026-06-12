@@ -16,3 +16,19 @@ __pycache__/
 .localstack/
 postgres-data/
 grafana-data/
+
+# Build artifacts
+build/
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!.tfvars.example
+
+# AWS CLI-Test
+events/lambda-sensor-reading.json
+
+# ESP32 local secrets
+hardware/esp32-wetterstation/secrets.h

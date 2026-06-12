@@ -1,0 +1,6 @@
+{
+  "headers": {
+    "x-collector-token": "replace-with-your-token"
+  },
+  "body": "{\"device_id\":\"lambda-test-device\",\"temperature_c\":22.5,\"humidity_pct\":45.0,\"pressure_hpa\":1013.2}"
+}

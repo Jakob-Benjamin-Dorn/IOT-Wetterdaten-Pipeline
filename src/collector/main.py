@@ -2,7 +2,8 @@ from fastapi import FastAPI, HTTPException, Request
 from pydantic import ValidationError
 
 from src.collector.exceptions import CollectorStorageError
-from src.collector.ingestion import ensure_bucket_exists, store_reading
+from src.collector.ingestion import store_reading
+from src.collector.raw_storage import ensure_bucket_exists
 from src.collector.models import FallbackWeatherReading, SensorReading
 
 
