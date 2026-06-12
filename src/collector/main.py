@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import ValidationError
 
+from src.collector.exceptions import CollectorStorageError
 from src.collector.ingestion import ensure_bucket_exists, store_reading
 from src.collector.models import FallbackWeatherReading, SensorReading
 
@@ -40,23 +41,29 @@ async def receive_reading(request: Request):
             detail=exc.errors(),
         ) from exc
 
-    return store_reading(
-        source="sensor",
-        device_id=reading.device_id,
-        temperature_c=reading.temperature_c,
-        humidity_pct=reading.humidity_pct,
-        pressure_hpa=reading.pressure_hpa,
-        payload=payload,
-    )
+    try:
+        return store_reading(
+            source="sensor",
+            device_id=reading.device_id,
+            temperature_c=reading.temperature_c,
+            humidity_pct=reading.humidity_pct,
+            pressure_hpa=reading.pressure_hpa,
+            payload=payload,
+        )
+    except CollectorStorageError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.post("/fallback-readings", status_code=202)
 def receive_fallback_reading(reading: FallbackWeatherReading):
-    return store_reading(
-        source="openweather",
-        device_id=reading.location,
-        temperature_c=reading.temperature_c,
-        humidity_pct=reading.humidity_pct,
-        pressure_hpa=reading.pressure_hpa,
-        payload=reading.model_dump(),
-    )
+    try:
+        return store_reading(
+            source="openweather",
+            device_id=reading.location,
+            temperature_c=reading.temperature_c,
+            humidity_pct=reading.humidity_pct,
+            pressure_hpa=reading.pressure_hpa,
+            payload=reading.model_dump(),
+        )
+    except CollectorStorageError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc

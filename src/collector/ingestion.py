@@ -4,10 +4,10 @@ from uuid import uuid4
 
 import boto3
 from botocore.exceptions import ClientError
-from fastapi import HTTPException
 
 from src.collector.config import get_settings
 from src.collector.database import StoredReading, insert_reading
+from src.collector.exceptions import CollectorStorageError
 
 
 def get_s3_client():
@@ -84,10 +84,7 @@ def store_reading(
             ContentType="application/json",
         )
     except ClientError as exc:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Could not write reading to S3: {exc}",
-        ) from exc
+        raise CollectorStorageError(f"Could not write reading to S3: {exc}") from exc
 
     insert_reading(
         StoredReading(
