@@ -102,7 +102,8 @@ resource "aws_lambda_function" "collector" {
 
   environment {
     variables = {
-      RAW_BUCKET = aws_s3_bucket.raw_weather_data.bucket
+      RAW_BUCKET      = aws_s3_bucket.raw_weather_data.bucket
+      COLLECTOR_TOKEN = var.collector_token
     }
   }
 

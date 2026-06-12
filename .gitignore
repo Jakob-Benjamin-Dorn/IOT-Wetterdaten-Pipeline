@@ -26,3 +26,6 @@ build/
 *.tfstate.*
 *.tfvars
 !.tfvars.example
+
+# AWS CLI-Test
+events/lambda-sensor-reading.json

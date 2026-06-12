@@ -20,3 +20,9 @@ variable "raw_bucket_name" {
   description = "Globally unique S3 bucket name for raw weather payloads."
   type        = string
 }
+
+variable "collector_token" {
+  description = "Shared token required by the collector Lambda."
+  type        = string
+  sensitive   = true
+}
