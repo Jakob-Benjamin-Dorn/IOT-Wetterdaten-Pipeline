@@ -3,7 +3,7 @@ import json
 from pydantic import ValidationError
 
 from src.collector.exceptions import CollectorStorageError
-from src.collector.ingestion import store_reading
+from src.collector.ingestion import store_raw_reading
 from src.collector.models import SensorReading
 
 
@@ -40,12 +40,9 @@ def lambda_handler(event, context):
         )
 
     try:
-        result = store_reading(
+        result = store_raw_reading(
             source="sensor",
             device_id=reading.device_id,
-            temperature_c=reading.temperature_c,
-            humidity_pct=reading.humidity_pct,
-            pressure_hpa=reading.pressure_hpa,
             payload=payload,
         )
     except CollectorStorageError as exc:

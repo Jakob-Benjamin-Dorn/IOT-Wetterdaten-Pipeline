@@ -13,7 +13,7 @@ def test_lambda_handler_accepts_valid_sensor_payload(monkeypatch):
         }
 
     monkeypatch.setattr(
-        "src.collector.lambda_handler.store_reading",
+        "src.collector.lambda_handler.store_raw_reading",
         fake_store_reading,
     )
 

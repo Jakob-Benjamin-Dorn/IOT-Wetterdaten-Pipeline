@@ -55,18 +55,18 @@ def build_s3_key(source: str, device_id: str, received_at: datetime) -> str:
     )
 
 
-def store_reading(
+def store_raw_reading(
     *,
     source: str,
     device_id: str,
-    temperature_c: float,
-    humidity_pct: float,
-    pressure_hpa: float,
     payload: dict,
+    received_at: datetime | None = None,
 ):
     settings = get_settings()
 
-    received_at = datetime.now(timezone.utc)
+    if received_at is None:
+        received_at = datetime.now(timezone.utc)
+
     s3_key = build_s3_key(source, device_id, received_at)
 
     raw_record = {
@@ -86,6 +86,32 @@ def store_reading(
     except ClientError as exc:
         raise CollectorStorageError(f"Could not write reading to S3: {exc}") from exc
 
+    return {
+        "status": "accepted",
+        "source": source,
+        "bucket": settings.raw_bucket,
+        "key": s3_key,
+        "received_at": received_at,
+    }
+
+
+def store_reading(
+    *,
+    source: str,
+    device_id: str,
+    temperature_c: float,
+    humidity_pct: float,
+    pressure_hpa: float,
+    payload: dict,
+):
+    raw_result = store_raw_reading(
+        source=source,
+        device_id=device_id,
+        payload=payload,
+    )
+
+    received_at = raw_result["received_at"]
+
     insert_reading(
         StoredReading(
             source=source,
@@ -94,14 +120,14 @@ def store_reading(
             temperature_c=temperature_c,
             humidity_pct=humidity_pct,
             pressure_hpa=pressure_hpa,
-            raw_s3_bucket=settings.raw_bucket,
-            raw_s3_key=s3_key,
+            raw_s3_bucket=raw_result["bucket"],
+            raw_s3_key=raw_result["key"],
         )
     )
 
     return {
-        "status": "accepted",
-        "source": source,
-        "bucket": settings.raw_bucket,
-        "key": s3_key,
+        "status": raw_result["status"],
+        "source": raw_result["source"],
+        "bucket": raw_result["bucket"],
+        "key": raw_result["key"],
     }
