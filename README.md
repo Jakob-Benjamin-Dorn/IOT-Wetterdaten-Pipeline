@@ -1,5 +1,7 @@
 # IoT-Wetterdaten-Pipeline
 
+[![CI](https://github.com/Jakob-Benjamin-Dorn/IOT-Wetterdaten-Pipeline/actions/workflows/tests.yml/badge.svg)](https://github.com/Jakob-Benjamin-Dorn/IOT-Wetterdaten-Pipeline/actions/workflows/tests.yml)
+
 Lokales Portfolio-Projekt für eine kleine IoT-Wetterstation.
 
 Ein ESP32-C6-Zero mit BME280-Sensor misst Temperatur, Luftfeuchtigkeit und Luftdruck und sendet die Messwerte per HTTP an einen lokalen FastAPI-Collector. Der Collector speichert die Rohdaten in einem lokalen S3-kompatiblen Speicher über LocalStack und legt die validierten Messwerte zusätzlich in PostgreSQL ab. Grafana visualisiert die Messwerte aus PostgreSQL.
@@ -18,12 +20,15 @@ FastAPI Collector
 
 ## Aktuelle Ordnerstruktur
 
-scripts/
+scripts/fallback/
 ├── send-test-reading.sh          # sendet künstliche Sensordaten
 ├── send-fallback-reading.sh      # sendet künstliche Fallback-Daten
-├── fetch-openweather-reading.py  # ruft echte OpenWeather-Daten ab
 ├── show-latest-readings.sh       # zeigt letzte PostgreSQL-Zeilen
 └── list-raw-objects.sh           # zeigt Raw-Objekte in LocalStack S3
+scripts/dev/
+├── fetch-openweather-reading.py  # ruft echte OpenWeather-Daten ab
+├── check-and-fetch-fallback.py   # 
+└── run-fallback-check-loop.sh    #
 
 ## Aktueller Projektstand
 
@@ -149,21 +154,38 @@ cp .env.example .env
 Beispielwerte:
 
 ```env
+# LocalStack dummy credentials
 AWS_ACCESS_KEY_ID=test
 AWS_SECRET_ACCESS_KEY=test
 AWS_DEFAULT_REGION=eu-central-1
 
+# LocalStack endpoint on your machine
 LOCALSTACK_ENDPOINT=http://localhost:4566
+
+# S3 bucket for raw sensor payloads
 RAW_BUCKET=weather-raw
 
+# Local collector
 COLLECTOR_HOST=0.0.0.0
 COLLECTOR_PORT=8088
 
+# PostgreSQL
 POSTGRES_HOST=localhost
 POSTGRES_PORT=5433
 POSTGRES_DB=weather
 POSTGRES_USER=weather
 POSTGRES_PASSWORD=weather
+
+# OpenWeather fallback source
+OPENWEATHER_API_KEY=your_api_key_here
+OPENWEATHER_LAT=your_latitude_here
+OPENWEATHER_LON=your_longitude_here
+
+# Fallback behavior
+# Time without new sensor data until fallback is activated 
+FALLBACK_THRESHOLD_SECONDS=120
+# Time between fallback data fetches until sensor data arrives again
+FALLBACK_CHECK_INTERVAL_SECONDS=60
 ```
 
 Die Datei `.env` wird nicht committed.
@@ -370,11 +392,38 @@ Der Collector akzeptiert aktuell beide Pfade:
 | Grafana           | Visualisierung der Messwerte                                |
 | Docker Compose    | reproduzierbarer lokaler Betrieb von PostgreSQL und Grafana |
 
-## Nächste geplante Schritte
 
-1. README und lokalen Ablauf stabilisieren.
-2. Datenmodell um eine Spalte `source` erweitern.
-3. Künstliche Fallback-Werte als alternative Datenquelle testen.
-4. Danach echte OpenWeather-Anbindung ergänzen.
-5. Erst danach GitHub Actions und Terraform vorbereiten.
-6. Später: PostgreSQL lokal durch Amazon RDS for PostgreSQL ersetzen.
+# Cloud-Zielarchitektur
+
+## Ziel
+
+Die lokale IoT-Wetterdaten-Pipeline soll schrittweise in AWS überführt werden, ohne den Sensor-Endpunkt unnötig oft ändern zu müssen. Grafana soll dabei in EC2 laufen und nicht über den AWS-verwalteten Grafana-Service.
+
+## Stabiler Eintrittspunkt
+
+Der ESP32 soll langfristig an eine stabile HTTPS-Adresse senden, zum Beispiel:
+
+```text
+https://sensor.example.com/sensor-readings
+```
+
+Diese Adresse sollte unabhängig davon bleiben, ob dahinter Lambda, ECS oder später AWS IoT Core verwendet wird.
+
+
+---
+
+# Nächster Schritt: Cloud-Readiness durch zentrale Konfiguration
+
+Bevor wir Lambda oder Terraform anfassen, sollten wir den Code so vorbereiten, dass er nicht mehr überall direkt `os.getenv(...)` verstreut nutzt.
+
+Ziel:
+
+```text
+src/collector/config.py
+→ zentrale Laufzeitkonfiguration
+
+main.py
+→ nutzt Settings für S3/Bucket/LocalStack
+
+database.py
+→ nutzt Settings für PostgreSQL-Verbindung

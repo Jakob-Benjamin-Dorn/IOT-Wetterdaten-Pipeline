@@ -1,228 +1,460 @@
 {
-  "annotations": {
-    "list": [
-      {
-        "builtIn": 1,
-        "datasource": {
-          "type": "grafana",
-          "uid": "-- Grafana --"
+    "id": null,
+    "uid": "iot-wetterstation",
+    "title": "IoT-Wetterstation",
+    "tags": [
+        "iot",
+        "wetter",
+        "esp32",
+        "bme280"
+    ],
+    "timezone": "browser",
+    "schemaVersion": 42,
+    "version": 1,
+    "refresh": "30s",
+    "time": {
+        "from": "now-6h",
+        "to": "now"
+    },
+    "editable": true,
+    "graphTooltip": 0,
+    "links": [],
+    "templating": {
+        "list": []
+    },
+    "timepicker": {},
+    "annotations": {
+        "list": [
+            {
+                "builtIn": 1,
+                "datasource": {
+                    "type": "grafana",
+                    "uid": "-- Grafana --"
+                },
+                "enable": true,
+                "hide": true,
+                "iconColor": "rgba(0, 211, 255, 1)",
+                "name": "Annotations & Alerts",
+                "type": "dashboard"
+            }
+        ]
+    },
+    "panels": [
+        {
+            "id": 1,
+            "type": "text",
+            "title": "\u00dcbersicht",
+            "gridPos": {
+                "x": 0,
+                "y": 0,
+                "w": 24,
+                "h": 5
+            },
+            "options": {
+                "mode": "markdown",
+                "content": "# IoT-Wetterstation\n\nKarlsruhe-Wetterdaten als Near-Realtime-Messungen vom ESP32-C6-Zero mit BME280-Sensor.\n\nGemessen werden Temperatur, Luftfeuchtigkeit und Luftdruck. Die Rohdaten werden lokal in LocalStack-S3 archiviert und validierte Messwerte in PostgreSQL gespeichert."
+            }
         },
-        "enable": true,
-        "hide": true,
-        "iconColor": "rgba(0, 211, 255, 1)",
-        "name": "Annotations & Alerts",
-        "type": "dashboard"
-      }
+        {
+            "id": 2,
+            "type": "stat",
+            "title": "Letzte Messwerte",
+            "datasource": {
+                "type": "postgres",
+                "uid": "wetter-postgres"
+            },
+            "gridPos": {
+                "x": 0,
+                "y": 5,
+                "w": 24,
+                "h": 6
+            },
+            "targets": [
+                {
+                    "refId": "A",
+                    "format": "table",
+                    "rawQuery": true,
+                    "rawSql": "SELECT\n  temperature_c AS \"Temperatur \u00b0C\",\n  humidity_pct AS \"Luftfeuchtigkeit %\",\n  pressure_hpa AS \"Luftdruck hPa\"\nFROM weather_readings\nORDER BY received_at DESC\nLIMIT 1;",
+                    "datasource": {
+                        "type": "postgres",
+                        "uid": "wetter-postgres"
+                    }
+                }
+            ],
+            "options": {
+                "reduceOptions": {
+                    "values": false,
+                    "calcs": [
+                        "lastNotNull"
+                    ],
+                    "fields": ""
+                },
+                "orientation": "auto",
+                "textMode": "value_and_name",
+                "colorMode": "value",
+                "graphMode": "area",
+                "justifyMode": "auto"
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            {
+                                "color": "green",
+                                "value": null
+                            }
+                        ]
+                    }
+                },
+                "overrides": []
+            }
+        },
+        {
+            "id": 6,
+            "type": "table",
+            "title": "Letzte Aktualisierung",
+            "datasource": {
+                "type": "postgres",
+                "uid": "wetter-postgres"
+            },
+            "gridPos": {
+                "x": 0,
+                "y": 11,
+                "w": 24,
+                "h": 4
+            },
+            "targets": [
+                {
+                    "refId": "A",
+                    "format": "table",
+                    "rawQuery": true,
+                    "rawSql": "SELECT\n  source AS \"Quelle\",\n  device_id AS \"Ger\u00e4t / Referenz\",\n  received_at AS \"Zeitpunkt\"\nFROM weather_readings\nORDER BY received_at DESC\nLIMIT 1;",
+                    "datasource": {
+                        "type": "postgres",
+                        "uid": "wetter-postgres"
+                    }
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "custom": {
+                        "align": "auto",
+                        "cellOptions": {
+                            "type": "auto"
+                        },
+                        "inspect": false
+                    },
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            {
+                                "color": "green",
+                                "value": null
+                            }
+                        ]
+                    }
+                },
+                "overrides": []
+            },
+            "options": {
+                "showHeader": true,
+                "cellHeight": "sm"
+            }
+        },
+        {
+            "id": 3,
+            "type": "timeseries",
+            "title": "Temperaturverlauf",
+            "datasource": {
+                "type": "postgres",
+                "uid": "wetter-postgres"
+            },
+            "gridPos": {
+                "x": 0,
+                "y": 15,
+                "w": 8,
+                "h": 8
+            },
+            "targets": [
+                {
+                    "refId": "A",
+                    "format": "time_series",
+                    "rawQuery": true,
+                    "rawSql": "SELECT\n  received_at AS \"time\",\n  temperature_c AS \"Sensor\"\nFROM weather_readings\nWHERE\n  $__timeFilter(received_at)\n  AND source = 'sensor'\nORDER BY received_at;",
+                    "datasource": {
+                        "type": "postgres",
+                        "uid": "wetter-postgres"
+                    }
+                },
+                {
+                    "refId": "B",
+                    "format": "time_series",
+                    "rawQuery": true,
+                    "rawSql": "SELECT\n  received_at AS \"time\",\n  temperature_c AS \"OpenWeather\"\nFROM weather_readings\nWHERE\n  $__timeFilter(received_at)\n  AND source = 'openweather'\nORDER BY received_at;",
+                    "datasource": {
+                        "type": "postgres",
+                        "uid": "wetter-postgres"
+                    }
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "celsius",
+                    "custom": {
+                        "drawStyle": "line",
+                        "lineInterpolation": "linear",
+                        "lineWidth": 1,
+                        "fillOpacity": 0,
+                        "gradientMode": "none",
+                        "showPoints": "auto",
+                        "pointSize": 5,
+                        "spanNulls": false,
+                        "insertNulls": 3600000,
+                        "axisPlacement": "auto",
+                        "scaleDistribution": {
+                            "type": "linear"
+                        },
+                        "hideFrom": {
+                            "tooltip": false,
+                            "viz": false,
+                            "legend": false
+                        },
+                        "thresholdsStyle": {
+                            "mode": "off"
+                        }
+                    }
+                },
+                "overrides": [
+                    {
+                        "matcher": {
+                            "id": "byName",
+                            "options": "OpenWeather"
+                        },
+                        "properties": [
+                            {
+                                "id": "custom.showPoints",
+                                "value": "always"
+                            },
+                            {
+                                "id": "custom.lineWidth",
+                                "value": 1
+                            },
+                            {
+                                "id": "custom.pointSize",
+                                "value": 5
+                            }
+                        ]
+                    }
+                ]
+            },
+            "options": {
+                "legend": {
+                    "displayMode": "list",
+                    "placement": "bottom",
+                    "showLegend": true
+                },
+                "tooltip": {
+                    "mode": "single",
+                    "sort": "none"
+                }
+            }
+        },
+        {
+            "id": 4,
+            "type": "timeseries",
+            "title": "Luftfeuchtigkeit",
+            "datasource": {
+                "type": "postgres",
+                "uid": "wetter-postgres"
+            },
+            "gridPos": {
+                "x": 8,
+                "y": 15,
+                "w": 8,
+                "h": 8
+            },
+            "targets": [
+                {
+                    "refId": "A",
+                    "format": "time_series",
+                    "rawQuery": true,
+                    "rawSql": "SELECT\n  received_at AS \"time\",\n  humidity_pct AS \"Sensor\"\nFROM weather_readings\nWHERE\n  $__timeFilter(received_at)\n  AND source = 'sensor'\nORDER BY received_at;",
+                    "datasource": {
+                        "type": "postgres",
+                        "uid": "wetter-postgres"
+                    }
+                },
+                {
+                    "refId": "B",
+                    "format": "time_series",
+                    "rawQuery": true,
+                    "rawSql": "SELECT\n  received_at AS \"time\",\n  humidity_pct AS \"OpenWeather\"\nFROM weather_readings\nWHERE\n  $__timeFilter(received_at)\n  AND source = 'openweather'\nORDER BY received_at;",
+                    "datasource": {
+                        "type": "postgres",
+                        "uid": "wetter-postgres"
+                    }
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "humidity",
+                    "custom": {
+                        "drawStyle": "line",
+                        "lineInterpolation": "linear",
+                        "lineWidth": 1,
+                        "fillOpacity": 0,
+                        "gradientMode": "none",
+                        "showPoints": "auto",
+                        "pointSize": 5,
+                        "spanNulls": false,
+                        "insertNulls": 3600000,
+                        "axisPlacement": "auto",
+                        "scaleDistribution": {
+                            "type": "linear"
+                        },
+                        "hideFrom": {
+                            "tooltip": false,
+                            "viz": false,
+                            "legend": false
+                        },
+                        "thresholdsStyle": {
+                            "mode": "off"
+                        }
+                    }
+                },
+                "overrides": [
+                    {
+                        "matcher": {
+                            "id": "byName",
+                            "options": "OpenWeather"
+                        },
+                        "properties": [
+                            {
+                                "id": "custom.showPoints",
+                                "value": "always"
+                            },
+                            {
+                                "id": "custom.lineWidth",
+                                "value": 1
+                            },
+                            {
+                                "id": "custom.pointSize",
+                                "value": 5
+                            }
+                        ]
+                    }
+                ]
+            },
+            "options": {
+                "legend": {
+                    "displayMode": "list",
+                    "placement": "bottom",
+                    "showLegend": true
+                },
+                "tooltip": {
+                    "mode": "single",
+                    "sort": "none"
+                }
+            }
+        },
+        {
+            "id": 5,
+            "type": "timeseries",
+            "title": "Luftdruck",
+            "datasource": {
+                "type": "postgres",
+                "uid": "wetter-postgres"
+            },
+            "gridPos": {
+                "x": 16,
+                "y": 15,
+                "w": 8,
+                "h": 8
+            },
+            "targets": [
+                {
+                    "refId": "A",
+                    "format": "time_series",
+                    "rawQuery": true,
+                    "rawSql": "SELECT\n  received_at AS \"time\",\n  pressure_hpa AS \"Sensor\"\nFROM weather_readings\nWHERE\n  $__timeFilter(received_at)\n  AND source = 'sensor'\nORDER BY received_at;",
+                    "datasource": {
+                        "type": "postgres",
+                        "uid": "wetter-postgres"
+                    }
+                },
+                {
+                    "refId": "B",
+                    "format": "time_series",
+                    "rawQuery": true,
+                    "rawSql": "SELECT\n  received_at AS \"time\",\n  pressure_hpa AS \"OpenWeather\"\nFROM weather_readings\nWHERE\n  $__timeFilter(received_at)\n  AND source = 'openweather'\nORDER BY received_at;",
+                    "datasource": {
+                        "type": "postgres",
+                        "uid": "wetter-postgres"
+                    }
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "pressurehpa",
+                    "custom": {
+                        "drawStyle": "line",
+                        "lineInterpolation": "linear",
+                        "lineWidth": 1,
+                        "fillOpacity": 0,
+                        "gradientMode": "none",
+                        "showPoints": "auto",
+                        "pointSize": 5,
+                        "spanNulls": false,
+                        "insertNulls": 3600000,
+                        "axisPlacement": "auto",
+                        "scaleDistribution": {
+                            "type": "linear"
+                        },
+                        "hideFrom": {
+                            "tooltip": false,
+                            "viz": false,
+                            "legend": false
+                        },
+                        "thresholdsStyle": {
+                            "mode": "off"
+                        }
+                    }
+                },
+                "overrides": [
+                    {
+                        "matcher": {
+                            "id": "byName",
+                            "options": "OpenWeather"
+                        },
+                        "properties": [
+                            {
+                                "id": "custom.showPoints",
+                                "value": "always"
+                            },
+                            {
+                                "id": "custom.lineWidth",
+                                "value": 1
+                            },
+                            {
+                                "id": "custom.pointSize",
+                                "value": 5
+                            }
+                        ]
+                    }
+                ]
+            },
+            "options": {
+                "legend": {
+                    "displayMode": "list",
+                    "placement": "bottom",
+                    "showLegend": true
+                },
+                "tooltip": {
+                    "mode": "single",
+                    "sort": "none"
+                }
+            }
+        }
     ]
-  },
-  "editable": true,
-  "fiscalYearStartMonth": 0,
-  "graphTooltip": 0,
-  "links": [],
-  "panels": [
-    {
-      "gridPos": {
-        "h": 5,
-        "w": 24,
-        "x": 0,
-        "y": 0
-      },
-      "id": 1,
-      "options": {
-        "content": "# IoT-Wetterstation\n\nKarlsruhe-Wetterdaten als Near-Realtime-Messungen vom ESP32-C6-Zero mit BME280-Sensor.\n\nGemessen werden Temperatur, Luftfeuchtigkeit und Luftdruck. Die Rohdaten werden lokal in LocalStack-S3 archiviert und validierte Messwerte in PostgreSQL gespeichert.",
-        "mode": "markdown"
-      },
-      "title": "Übersicht",
-      "type": "text"
-    },
-    {
-      "datasource": {
-        "type": "postgres",
-        "uid": "wetter-postgres"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green"
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 6,
-        "w": 24,
-        "x": 0,
-        "y": 5
-      },
-      "id": 2,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "value_and_name"
-      },
-      "targets": [
-        {
-          "format": "table",
-          "rawQuery": true,
-          "rawSql": "SELECT\n  temperature_c AS \"Temperatur °C\",\n  humidity_pct AS \"Luftfeuchtigkeit %\",\n  pressure_hpa AS \"Luftdruck hPa\"\nFROM weather_readings\nORDER BY received_at DESC\nLIMIT 1;",
-          "refId": "A"
-        }
-      ],
-      "title": "Letzte Messwerte",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "postgres",
-        "uid": "wetter-postgres"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "celsius"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 0,
-        "y": 11
-      },
-      "id": 3,
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "format": "time_series",
-          "rawQuery": true,
-          "rawSql": "SELECT\n  received_at AS \"time\",\n  temperature_c AS \"Temperatur °C\"\nFROM weather_readings\nWHERE $__timeFilter(received_at)\nORDER BY received_at;",
-          "refId": "A"
-        }
-      ],
-      "title": "Temperaturverlauf",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "postgres",
-        "uid": "wetter-postgres"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "humidity"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 8,
-        "y": 11
-      },
-      "id": 4,
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "format": "time_series",
-          "rawQuery": true,
-          "rawSql": "SELECT\n  received_at AS \"time\",\n  humidity_pct AS \"Luftfeuchtigkeit %\"\nFROM weather_readings\nWHERE $__timeFilter(received_at)\nORDER BY received_at;",
-          "refId": "A"
-        }
-      ],
-      "title": "Luftfeuchtigkeit",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "postgres",
-        "uid": "wetter-postgres"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "pressurehpa"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 16,
-        "y": 11
-      },
-      "id": 5,
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "format": "time_series",
-          "rawQuery": true,
-          "rawSql": "SELECT\n  received_at AS \"time\",\n  pressure_hpa AS \"Luftdruck hPa\"\nFROM weather_readings\nWHERE $__timeFilter(received_at)\nORDER BY received_at;",
-          "refId": "A"
-        }
-      ],
-      "title": "Luftdruck",
-      "type": "timeseries"
-    }
-  ],
-  "refresh": "30s",
-  "schemaVersion": 42,
-  "tags": [
-    "iot",
-    "wetter",
-    "esp32",
-    "bme280"
-  ],
-  "templating": {
-    "list": []
-  },
-  "time": {
-    "from": "now-6h",
-    "to": "now"
-  },
-  "timepicker": {},
-  "timezone": "browser",
-  "title": "IoT-Wetterstation",
-  "weekStart": "",
-  "version": 2,
-  "uid": "iot-wetterstation",
-  "id": 2423289106305024
 }
