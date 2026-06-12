@@ -10,35 +10,36 @@ from pydantic import ValidationError
 from src.collector.models import FallbackWeatherReading, SensorReading
 
 from src.collector.database import StoredReading, insert_reading
-
-
-AWS_REGION = os.getenv("AWS_DEFAULT_REGION", "eu-central-1")
-LOCALSTACK_ENDPOINT = os.getenv("LOCALSTACK_ENDPOINT", "http://localhost:4566")
-RAW_BUCKET = os.getenv("RAW_BUCKET", "weather-raw")
+from src.collector.config import get_settings
 
 
 app = FastAPI(title="Wetter IoT Collector")
 
 
 def get_s3_client():
-    return boto3.client(
-        "s3",
-        endpoint_url=LOCALSTACK_ENDPOINT,
-        region_name=AWS_REGION,
-        aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID", "test"),
-        aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY", "test"),
-    )
+    settings = get_settings()
+
+    client_kwargs = {
+        "service_name": "s3",
+        "region_name": settings.aws_region,
+    }
+
+    if settings.localstack_endpoint:
+        client_kwargs["endpoint_url"] = settings.localstack_endpoint
+
+    return boto3.client(**client_kwargs)
 
 
 def ensure_bucket_exists() -> None:
     s3 = get_s3_client()
+    settings = get_settings()
 
     try:
-        s3.head_bucket(Bucket=RAW_BUCKET)
+        s3.head_bucket(Bucket=settings.raw_bucket)
     except ClientError:
         s3.create_bucket(
-            Bucket=RAW_BUCKET,
-            CreateBucketConfiguration={"LocationConstraint": AWS_REGION},
+            Bucket=settings.raw_bucket,
+            CreateBucketConfiguration={"LocationConstraint": settings.aws_region},
         )
 
 
@@ -78,6 +79,7 @@ def store_reading(
 ):
     received_at = datetime.now(timezone.utc)
     s3_key = build_s3_key(source, device_id, received_at)
+    settings = get_settings()
 
     raw_record = {
         "received_at": received_at.isoformat(),
@@ -88,7 +90,7 @@ def store_reading(
     try:
         s3 = get_s3_client()
         s3.put_object(
-            Bucket=RAW_BUCKET,
+            Bucket=settings.raw_bucket,
             Key=s3_key,
             Body=json.dumps(raw_record).encode("utf-8"),
             ContentType="application/json",
@@ -107,7 +109,7 @@ def store_reading(
             temperature_c=temperature_c,
             humidity_pct=humidity_pct,
             pressure_hpa=pressure_hpa,
-            raw_s3_bucket=RAW_BUCKET,
+            raw_s3_bucket=settings.raw_bucket,
             raw_s3_key=s3_key,
         )
     )
@@ -115,7 +117,7 @@ def store_reading(
     return {
         "status": "accepted",
         "source": source,
-        "bucket": RAW_BUCKET,
+        "bucket": settings.raw_bucket,
         "key": s3_key,
     }
 

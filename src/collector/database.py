@@ -4,6 +4,8 @@ from datetime import datetime
 
 import psycopg
 
+from src.collector.config import get_settings
+
 
 @dataclass
 class StoredReading:
@@ -18,13 +20,15 @@ class StoredReading:
 
 
 def get_connection_string() -> str:
-    host = os.getenv("POSTGRES_HOST", "localhost")
-    port = os.getenv("POSTGRES_PORT", "5433")
-    db = os.getenv("POSTGRES_DB", "weather")
-    user = os.getenv("POSTGRES_USER", "weather")
-    password = os.getenv("POSTGRES_PASSWORD", "weather")
+    settings = get_settings()
 
-    return f"host={host} port={port} dbname={db} user={user} password={password}"
+    return (
+        f"host={settings.postgres_host} "
+        f"port={settings.postgres_port} "
+        f"dbname={settings.postgres_db} "
+        f"user={settings.postgres_user} "
+        f"password={settings.postgres_password}"
+    )
 
 
 def insert_reading(reading: StoredReading) -> None:
