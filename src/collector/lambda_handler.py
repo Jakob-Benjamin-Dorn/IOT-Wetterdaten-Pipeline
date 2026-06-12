@@ -3,7 +3,7 @@ import json
 from pydantic import ValidationError
 
 from src.collector.exceptions import CollectorStorageError
-from src.collector.ingestion import store_raw_reading
+from src.collector.raw_storage import store_raw_reading
 from src.collector.models import SensorReading
 
 
@@ -53,4 +53,4 @@ def lambda_handler(event, context):
             },
         )
 
-    return response(202, result)
+    return response(202, result.to_response_dict())

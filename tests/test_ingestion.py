@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from src.collector.ingestion import build_s3_key
+from src.collector.raw_storage import build_s3_key
 
 
 def test_build_s3_key_partitions_by_source_and_device_id():

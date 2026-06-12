@@ -61,6 +61,12 @@ tests/
 └── test_models.py
 ```
 
+aktualisieren:
+raw_storage.py  = nur S3 Raw JSON
+ingestion.py    = S3 Raw JSON + PostgreSQL
+lambda_handler.py → nutzt raw_storage.py
+main.py         → nutzt ingestion.py
+
 ## Aktueller Projektstand
 
 Bereits umgesetzt:

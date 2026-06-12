@@ -1,20 +1,23 @@
 import json
+from datetime import datetime, timezone
+from src.collector.raw_storage import RawStorageResult
 
 from src.collector.lambda_handler import lambda_handler
 
 
 def test_lambda_handler_accepts_valid_sensor_payload(monkeypatch):
-    def fake_store_reading(**kwargs):
-        return {
-            "status": "accepted",
-            "source": kwargs["source"],
-            "bucket": "weather-raw",
-            "key": "raw_readings/test.json",
-        }
+    def fake_store_raw_reading(**kwargs):
+        return RawStorageResult(
+            status="accepted",
+            source=kwargs["source"],
+            bucket="weather-raw",
+            key="raw_readings/test.json",
+            received_at=datetime(2026, 6, 12, 12, 0, tzinfo=timezone.utc),
+        )
 
     monkeypatch.setattr(
         "src.collector.lambda_handler.store_raw_reading",
-        fake_store_reading,
+        fake_store_raw_reading,
     )
 
     event = {
