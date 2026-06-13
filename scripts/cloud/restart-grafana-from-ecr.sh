@@ -21,9 +21,7 @@ COMMANDS=$(cat <<EOF
   "set -euxo pipefail",
   "aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}",
   "docker pull ${IMAGE_URI}",
-  "docker volume create grafana-data || true",
-  "docker rm -f grafana || true",
-  "docker run -d --name grafana --restart unless-stopped -p 127.0.0.1:3000:3000 -v grafana-data:/var/lib/grafana -v /opt/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro -e GF_SECURITY_ADMIN_USER=admin -e GF_SECURITY_ADMIN_PASSWORD=admin -e GF_USERS_ALLOW_SIGN_UP=false -e GF_AUTH_ANONYMOUS_ENABLED=false ${IMAGE_URI}",
+  "/opt/grafana/run-grafana.sh ${IMAGE_URI}",
   "sleep 10",
   "curl -f http://127.0.0.1:3000/api/health"
 ]
