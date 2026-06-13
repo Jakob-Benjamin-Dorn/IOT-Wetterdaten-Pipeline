@@ -106,3 +106,49 @@ def insert_normalized_reading(reading: NormalizedReading) -> None:
 
     except psycopg.Error as exc:
         raise CollectorStorageError(f"Could not write reading to RDS: {exc}") from exc
+
+
+def get_latest_readings(limit: int = 10) -> list[dict]:
+    safe_limit = max(1, min(limit, 100))
+
+    try:
+        with psycopg.connect(get_connection_string()) as conn:
+            ensure_schema_exists(conn)
+
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT
+                        source,
+                        device_id,
+                        received_at,
+                        temperature_c,
+                        humidity_pct,
+                        pressure_hpa,
+                        raw_s3_bucket,
+                        raw_s3_key
+                    FROM weather_readings
+                    ORDER BY received_at DESC
+                    LIMIT %s
+                    """,
+                    (safe_limit,),
+                )
+
+                rows = cur.fetchall()
+
+        return [
+            {
+                "source": row[0],
+                "device_id": row[1],
+                "received_at": row[2].isoformat(),
+                "temperature_c": row[3],
+                "humidity_pct": row[4],
+                "pressure_hpa": row[5],
+                "raw_s3_bucket": row[6],
+                "raw_s3_key": row[7],
+            }
+            for row in rows
+        ]
+
+    except psycopg.Error as exc:
+        raise CollectorStorageError(f"Could not read latest readings from RDS: {exc}") from exc

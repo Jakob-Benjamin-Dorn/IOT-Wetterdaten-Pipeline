@@ -334,3 +334,9 @@ resource "aws_lambda_permission" "allow_api_gateway" {
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${aws_apigatewayv2_api.collector.execution_arn}/*/*"
 }
+
+resource "aws_apigatewayv2_route" "latest_readings" {
+  api_id    = aws_apigatewayv2_api.collector.id
+  route_key = "GET /latest-readings"
+  target    = "integrations/${aws_apigatewayv2_integration.collector_lambda.id}"
+}

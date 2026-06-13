@@ -178,3 +178,67 @@ def test_lambda_handler_returns_500_when_rds_write_fails(monkeypatch):
 
     assert result["statusCode"] == 500
     assert "Could not write reading to RDS" in body["detail"]
+
+
+def test_lambda_handler_returns_latest_readings(monkeypatch):
+    monkeypatch.setenv("COLLECTOR_TOKEN", "test-token")
+
+    def fake_get_latest_readings(limit=10):
+        return [
+            {
+                "source": "sensor",
+                "device_id": "esp32-c6-window-01",
+                "received_at": "2026-06-13T08:00:00+00:00",
+                "temperature_c": 22.1,
+                "humidity_pct": 53.2,
+                "pressure_hpa": 1010.8,
+                "raw_s3_bucket": "weather-raw",
+                "raw_s3_key": "raw_readings/test.json",
+            }
+        ]
+
+    monkeypatch.setattr(
+        "src.collector.lambda_handler.get_latest_readings",
+        fake_get_latest_readings,
+    )
+
+    event = {
+        "headers": {
+            "x-collector-token": "test-token",
+        },
+        "requestContext": {
+            "http": {
+                "method": "GET",
+            }
+        },
+        "rawPath": "/latest-readings",
+    }
+
+    result = lambda_handler(event, None)
+    body = json.loads(result["body"])
+
+    assert result["statusCode"] == 200
+    assert body["count"] == 1
+    assert body["readings"][0]["device_id"] == "esp32-c6-window-01"
+
+
+def test_lambda_handler_returns_404_for_unknown_route(monkeypatch):
+    monkeypatch.setenv("COLLECTOR_TOKEN", "test-token")
+
+    event = {
+        "headers": {
+            "x-collector-token": "test-token",
+        },
+        "requestContext": {
+            "http": {
+                "method": "GET",
+            }
+        },
+        "rawPath": "/unknown",
+    }
+
+    result = lambda_handler(event, None)
+    body = json.loads(result["body"])
+
+    assert result["statusCode"] == 404
+    assert body["detail"] == "Route not found"

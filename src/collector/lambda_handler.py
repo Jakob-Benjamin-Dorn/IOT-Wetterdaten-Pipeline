@@ -7,10 +7,64 @@ from pydantic import ValidationError
 from src.collector.exceptions import CollectorStorageError
 from src.collector.models import SensorReading
 from src.collector.raw_storage import store_raw_reading
-from src.collector.rds_storage import NormalizedReading, insert_normalized_reading
+from src.collector.rds_storage import (
+    NormalizedReading,
+    get_latest_readings,
+    insert_normalized_reading,
+)
 
 
 TOKEN_HEADER_NAME = "x-collector-token"
+
+
+def get_request_method(event: dict) -> str:
+    return (
+        event.get("requestContext", {})
+        .get("http", {})
+        .get("method", "POST")
+        .upper()
+    )
+
+
+def get_request_path(event: dict) -> str:
+    return event.get("rawPath") or event.get("path") or "/sensor-readings"
+
+
+def handle_sensor_reading(event: dict) -> dict:
+    try:
+        payload = json.loads(event.get("body") or "{}")
+    except json.JSONDecodeError as exc:
+        return response(400, {"detail": f"Invalid JSON body: {exc}"})
+
+    try:
+        reading = SensorReading.model_validate(payload)
+    except ValidationError as exc:
+        return response(422, {"detail": exc.errors()})
+
+    try:
+        result = store_raw_reading(
+            source="sensor",
+            device_id=reading.device_id,
+            payload=payload,
+        )
+
+        insert_normalized_reading(
+            NormalizedReading(
+                source="sensor",
+                device_id=reading.device_id,
+                received_at=result.received_at,
+                temperature_c=reading.temperature_c,
+                humidity_pct=reading.humidity_pct,
+                pressure_hpa=reading.pressure_hpa,
+                raw_s3_bucket=result.bucket,
+                raw_s3_key=result.key,
+            )
+        )
+
+    except CollectorStorageError as exc:
+        return response(500, {"detail": str(exc)})
+
+    return response(202, result.to_response_dict())
 
 
 def response(status_code: int, body: dict) -> dict:
@@ -47,41 +101,39 @@ def is_authorized(event: dict) -> bool:
     return hmac.compare_digest(provided_token, expected_token)
 
 
+def handle_latest_readings() -> dict:
+    try:
+        readings = get_latest_readings(limit=10)
+    except CollectorStorageError as exc:
+        return response(500, {"detail": str(exc)})
+
+    return response(
+        200,
+        {
+            "count": len(readings),
+            "readings": readings,
+        },
+    )
+
+
 def lambda_handler(event, context):
     if not is_authorized(event):
         return response(401, {"detail": "Unauthorized"})
 
-    try:
-        payload = json.loads(event.get("body") or "{}")
-    except json.JSONDecodeError as exc:
-        return response(400, {"detail": f"Invalid JSON body: {exc}"})
+    method = get_request_method(event)
+    path = get_request_path(event)
 
-    try:
-        reading = SensorReading.model_validate(payload)
-    except ValidationError as exc:
-        return response(422, {"detail": exc.errors()})
+    if method == "GET" and path == "/latest-readings":
+        return handle_latest_readings()
 
-    try:
-        result = store_raw_reading(
-            source="sensor",
-            device_id=reading.device_id,
-            payload=payload,
-        )
+    if method == "POST" and path in ["/sensor-readings", "/readings"]:
+        return handle_sensor_reading(event)
 
-        insert_normalized_reading(
-            NormalizedReading(
-                source="sensor",
-                device_id=reading.device_id,
-                received_at=result.received_at,
-                temperature_c=reading.temperature_c,
-                humidity_pct=reading.humidity_pct,
-                pressure_hpa=reading.pressure_hpa,
-                raw_s3_bucket=result.bucket,
-                raw_s3_key=result.key,
-            )
-        )
-
-    except CollectorStorageError as exc:
-        return response(500, {"detail": str(exc)})
-
-    return response(202, result.to_response_dict())
+    return response(
+        404,
+        {
+            "detail": "Route not found",
+            "method": method,
+            "path": path,
+        },
+    )
