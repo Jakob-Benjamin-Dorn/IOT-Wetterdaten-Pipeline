@@ -96,3 +96,62 @@ variable "github_branch" {
   type        = string
   default     = "main"
 }
+
+variable "api_default_throttling_rate_limit" {
+  description = "Default steady-state requests per second for the HTTP API stage."
+  type        = number
+  default     = 2
+}
+
+variable "api_default_throttling_burst_limit" {
+  description = "Default burst limit for the HTTP API stage."
+  type        = number
+  default     = 5
+}
+
+variable "api_sensor_throttling_rate_limit" {
+  description = "Steady-state requests per second for sensor ingestion."
+  type        = number
+  default     = 1
+}
+
+variable "api_sensor_throttling_burst_limit" {
+  description = "Burst limit for sensor ingestion."
+  type        = number
+  default     = 3
+}
+
+variable "api_read_throttling_rate_limit" {
+  description = "Steady-state requests per second for latest-readings debug endpoint."
+  type        = number
+  default     = 1
+}
+
+variable "api_read_throttling_burst_limit" {
+  description = "Burst limit for latest-readings debug endpoint."
+  type        = number
+  default     = 3
+}
+
+variable "collector_reserved_concurrency" {
+  description = "Maximum concurrent executions for the collector Lambda."
+  type        = number
+  default     = 3
+}
+
+variable "fallback_reserved_concurrency" {
+  description = "Maximum concurrent executions for the fallback Lambda."
+  type        = number
+  default     = 1
+}
+
+variable "monthly_budget_limit_usd" {
+  description = "Monthly AWS budget limit for this dev account/project."
+  type        = string
+  default     = "15"
+}
+
+variable "budget_alert_email" {
+  description = "Email address for AWS Budget alerts."
+  type        = string
+}
