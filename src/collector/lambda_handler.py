@@ -7,6 +7,7 @@ from pydantic import ValidationError
 from src.collector.exceptions import CollectorStorageError
 from src.collector.models import SensorReading
 from src.collector.raw_storage import store_raw_reading
+from src.collector.rds_storage import NormalizedReading, insert_normalized_reading
 
 
 TOKEN_HEADER_NAME = "x-collector-token"
@@ -66,6 +67,20 @@ def lambda_handler(event, context):
             device_id=reading.device_id,
             payload=payload,
         )
+
+        insert_normalized_reading(
+            NormalizedReading(
+                source="sensor",
+                device_id=reading.device_id,
+                received_at=result.received_at,
+                temperature_c=reading.temperature_c,
+                humidity_pct=reading.humidity_pct,
+                pressure_hpa=reading.pressure_hpa,
+                raw_s3_bucket=result.bucket,
+                raw_s3_key=result.key,
+            )
+        )
+
     except CollectorStorageError as exc:
         return response(500, {"detail": str(exc)})
 

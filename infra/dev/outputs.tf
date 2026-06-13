@@ -22,3 +22,18 @@ output "collector_api_endpoint" {
   description = "HTTP API endpoint for the collector."
   value       = aws_apigatewayv2_api.collector.api_endpoint
 }
+
+output "postgres_endpoint" {
+  description = "RDS PostgreSQL endpoint."
+  value       = aws_db_instance.postgres.address
+}
+
+output "postgres_database" {
+  description = "RDS PostgreSQL database name."
+  value       = aws_db_instance.postgres.db_name
+}
+
+output "postgres_username" {
+  description = "RDS PostgreSQL username."
+  value       = aws_db_instance.postgres.username
+}

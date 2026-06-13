@@ -24,10 +24,22 @@ def test_lambda_handler_accepts_valid_sensor_payload(monkeypatch):
             received_at=datetime(2026, 6, 12, 12, 0, tzinfo=timezone.utc),
         )
 
+    def fake_insert_normalized_reading(reading):
+        assert reading.source == "sensor"
+        assert reading.device_id == "esp32-c6-window-01"
+        assert reading.raw_s3_bucket == "weather-raw"
+        assert reading.raw_s3_key == "raw_readings/test.json"
+
     monkeypatch.setattr(
         "src.collector.lambda_handler.store_raw_reading",
         fake_store_raw_reading,
     )
+
+    monkeypatch.setattr(
+        "src.collector.lambda_handler.insert_normalized_reading",
+        fake_insert_normalized_reading,
+    )
+
     monkeypatch.setenv("COLLECTOR_TOKEN", "test-token")
 
     event = authorized_event(
@@ -123,3 +135,46 @@ def test_lambda_handler_rejects_wrong_token(monkeypatch):
     result = lambda_handler(event, None)
 
     assert result["statusCode"] == 401
+
+
+def test_lambda_handler_returns_500_when_rds_write_fails(monkeypatch):
+    def fake_store_raw_reading(**kwargs):
+        return RawStorageResult(
+            status="accepted",
+            source=kwargs["source"],
+            bucket="weather-raw",
+            key="raw_readings/test.json",
+            received_at=datetime(2026, 6, 12, 12, 0, tzinfo=timezone.utc),
+        )
+
+    def fake_insert_normalized_reading(reading):
+        from src.collector.exceptions import CollectorStorageError
+
+        raise CollectorStorageError("Could not write reading to RDS")
+
+    monkeypatch.setattr(
+        "src.collector.lambda_handler.store_raw_reading",
+        fake_store_raw_reading,
+    )
+    monkeypatch.setattr(
+        "src.collector.lambda_handler.insert_normalized_reading",
+        fake_insert_normalized_reading,
+    )
+    monkeypatch.setenv("COLLECTOR_TOKEN", "test-token")
+
+    event = authorized_event(
+        json.dumps(
+            {
+                "device_id": "esp32-c6-window-01",
+                "temperature_c": 22.5,
+                "humidity_pct": 45.0,
+                "pressure_hpa": 1013.2,
+            }
+        )
+    )
+
+    result = lambda_handler(event, None)
+    body = json.loads(result["body"])
+
+    assert result["statusCode"] == 500
+    assert "Could not write reading to RDS" in body["detail"]
