@@ -26,3 +26,21 @@ variable "collector_token" {
   type        = string
   sensitive   = true
 }
+
+variable "db_name" {
+  description = "PostgreSQL database name."
+  type        = string
+  default     = "weather"
+}
+
+variable "db_username" {
+  description = "PostgreSQL admin username."
+  type        = string
+  default     = "weather"
+}
+
+variable "db_password" {
+  description = "PostgreSQL admin password."
+  type        = string
+  sensitive   = true
+}
