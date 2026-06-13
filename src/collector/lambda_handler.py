@@ -5,7 +5,7 @@ import os
 from pydantic import ValidationError
 
 from src.collector.exceptions import CollectorStorageError
-from src.collector.models import SensorReading
+from src.collector.models import FallbackWeatherReading, SensorReading
 from src.collector.raw_storage import store_raw_reading
 from src.collector.rds_storage import (
     NormalizedReading,
@@ -24,6 +24,10 @@ def get_request_method(event: dict) -> str:
         .get("method", "POST")
         .upper()
     )
+
+
+def get_query_params(event: dict) -> dict:
+    return event.get("queryStringParameters") or {}
 
 
 def get_request_path(event: dict) -> str:
@@ -101,9 +105,18 @@ def is_authorized(event: dict) -> bool:
     return hmac.compare_digest(provided_token, expected_token)
 
 
-def handle_latest_readings() -> dict:
+def handle_latest_readings(event: dict) -> dict:
+    query_params = get_query_params(event)
+
     try:
-        readings = get_latest_readings(limit=10)
+        limit = int(query_params.get("limit", "10"))
+    except ValueError:
+        return response(400, {"detail": "limit must be an integer"})
+
+    source = query_params.get("source")
+
+    try:
+        readings = get_latest_readings(limit=limit, source=source)
     except CollectorStorageError as exc:
         return response(500, {"detail": str(exc)})
 
@@ -124,10 +137,13 @@ def lambda_handler(event, context):
     path = get_request_path(event)
 
     if method == "GET" and path == "/latest-readings":
-        return handle_latest_readings()
+        return handle_latest_readings(event)
 
     if method == "POST" and path in ["/sensor-readings", "/readings"]:
         return handle_sensor_reading(event)
+
+    if method == "POST" and path == "/fallback-readings":
+        return handle_fallback_reading(event)
 
     return response(
         404,
@@ -137,3 +153,40 @@ def lambda_handler(event, context):
             "path": path,
         },
     )
+
+
+def handle_fallback_reading(event: dict) -> dict:
+    try:
+        payload = json.loads(event.get("body") or "{}")
+    except json.JSONDecodeError as exc:
+        return response(400, {"detail": f"Invalid JSON body: {exc}"})
+
+    try:
+        reading = FallbackWeatherReading.model_validate(payload)
+    except ValidationError as exc:
+        return response(422, {"detail": exc.errors()})
+
+    try:
+        result = store_raw_reading(
+            source="openweather",
+            device_id=reading.location,
+            payload=payload,
+        )
+
+        insert_normalized_reading(
+            NormalizedReading(
+                source="openweather",
+                device_id=reading.location,
+                received_at=result.received_at,
+                temperature_c=reading.temperature_c,
+                humidity_pct=reading.humidity_pct,
+                pressure_hpa=reading.pressure_hpa,
+                raw_s3_bucket=result.bucket,
+                raw_s3_key=result.key,
+            )
+        )
+
+    except CollectorStorageError as exc:
+        return response(500, {"detail": str(exc)})
+
+    return response(202, result.to_response_dict())

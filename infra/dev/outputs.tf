@@ -52,3 +52,13 @@ output "grafana_ecr_repository_url" {
   description = "ECR repository URL for the Grafana image."
   value       = aws_ecr_repository.grafana.repository_url
 }
+
+output "fallback_lambda_function_name" {
+  description = "Name of the cloud fallback Lambda function."
+  value       = aws_lambda_function.fallback.function_name
+}
+
+output "fallback_schedule_name" {
+  description = "Name of the EventBridge Scheduler schedule for cloud fallback checks."
+  value       = aws_scheduler_schedule.fallback_check.name
+}
