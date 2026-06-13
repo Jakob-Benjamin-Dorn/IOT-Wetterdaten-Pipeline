@@ -6,9 +6,6 @@ locals {
   }
 
   lambda_package_path = "${path.module}/../../build/lambda/collector-lambda.zip"
-
-  grafana_dashboard_path = "${path.module}/../../grafana/dashboards/iot-wetterstation.json"
-  grafana_dashboard_key  = "deployment/grafana/dashboards/iot-wetterstation.json"
 }
 
 resource "aws_s3_bucket" "raw_weather_data" {
@@ -21,16 +18,6 @@ resource "aws_s3_bucket" "raw_weather_data" {
       Name = "${var.project_name}-${var.environment}-raw-weather-data"
     }
   )
-}
-
-resource "aws_s3_object" "grafana_dashboard" {
-  bucket       = aws_s3_bucket.raw_weather_data.bucket
-  key          = local.grafana_dashboard_key
-  source       = local.grafana_dashboard_path
-  etag         = filemd5(local.grafana_dashboard_path)
-  content_type = "application/json"
-
-  tags = local.common_tags
 }
 
 resource "aws_s3_bucket_public_access_block" "raw_weather_data" {
@@ -328,24 +315,6 @@ resource "aws_iam_role_policy_attachment" "grafana_ec2_ssm" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
-resource "aws_iam_role_policy" "grafana_ec2_dashboard_read" {
-  name = "${var.project_name}-${var.environment}-grafana-dashboard-read"
-  role = aws_iam_role.grafana_ec2.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "s3:GetObject"
-        ]
-        Resource = "${aws_s3_bucket.raw_weather_data.arn}/${local.grafana_dashboard_key}"
-      }
-    ]
-  })
-}
-
 resource "aws_iam_instance_profile" "grafana_ec2" {
   name = "${var.project_name}-${var.environment}-grafana-ec2-profile"
   role = aws_iam_role.grafana_ec2.name
@@ -382,8 +351,6 @@ resource "aws_instance" "grafana" {
     systemctl start amazon-ssm-agent
 
     mkdir -p /opt/grafana/provisioning/datasources
-    mkdir -p /opt/grafana/provisioning/dashboards
-    mkdir -p /opt/grafana/dashboards
 
     cat > /opt/grafana/provisioning/datasources/rds-postgres.yml <<'DATASOURCE'
     apiVersion: 1
@@ -410,26 +377,13 @@ resource "aws_instance" "grafana" {
         editable: true
     DATASOURCE
 
-    cat > /opt/grafana/provisioning/dashboards/dashboards.yml <<'DASHBOARDS'
-    apiVersion: 1
+    aws ecr get-login-password --region ${var.aws_region} \
+      | docker login \
+          --username AWS \
+          --password-stdin ${split("/", aws_ecr_repository.grafana.repository_url)[0]}
 
-    providers:
-      - name: IoT Wetterstation
-        orgId: 1
-        folder: ""
-        type: file
-        disableDeletion: false
-        allowUiUpdates: true
-        updateIntervalSeconds: 60
-        options:
-          path: /var/lib/grafana/dashboards
-    DASHBOARDS
-
-    aws s3 cp \
-      "s3://${aws_s3_bucket.raw_weather_data.bucket}/${local.grafana_dashboard_key}" \
-      /opt/grafana/dashboards/iot-wetterstation.json \
-      --region ${var.aws_region}
-
+    docker pull ${aws_ecr_repository.grafana.repository_url}:latest
+    
     docker volume create grafana-data || true
 
     docker rm -f grafana || true
@@ -439,18 +393,17 @@ resource "aws_instance" "grafana" {
       --restart unless-stopped \
       -p 127.0.0.1:3000:3000 \
       -v grafana-data:/var/lib/grafana \
-      -v /opt/grafana/provisioning:/etc/grafana/provisioning:ro \
-      -v /opt/grafana/dashboards:/var/lib/grafana/dashboards:ro \
+      -v /opt/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro \
       -e GF_SECURITY_ADMIN_USER=admin \
       -e GF_SECURITY_ADMIN_PASSWORD='${var.grafana_admin_password}' \
       -e GF_USERS_ALLOW_SIGN_UP=false \
       -e GF_AUTH_ANONYMOUS_ENABLED=false \
-      grafana/grafana-oss:latest
+      ${aws_ecr_repository.grafana.repository_url}:latest
   EOF
 
   depends_on = [
-    aws_iam_role_policy.grafana_ec2_dashboard_read,
-    aws_s3_object.grafana_dashboard
+    aws_iam_role_policy.grafana_ec2_ecr_pull,
+    aws_ecr_repository.grafana
   ]
 
   tags = merge(
@@ -459,6 +412,46 @@ resource "aws_instance" "grafana" {
       Name = "${var.project_name}-${var.environment}-grafana"
     }
   )
+}
+
+resource "aws_ecr_repository" "grafana" {
+  name                 = "${var.project_name}-${var.environment}-grafana"
+  image_tag_mutability = "MUTABLE"
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+
+  force_delete = true
+
+  tags = local.common_tags
+}
+
+resource "aws_iam_role_policy" "grafana_ec2_ecr_pull" {
+  name = "${var.project_name}-${var.environment}-grafana-ecr-pull"
+  role = aws_iam_role.grafana_ec2.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "ecr:GetAuthorizationToken"
+        ]
+        Resource = "*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:BatchGetImage",
+          "ecr:GetDownloadUrlForLayer"
+        ]
+        Resource = aws_ecr_repository.grafana.arn
+      }
+    ]
+  })
 }
 
 resource "aws_iam_role" "collector_lambda" {
