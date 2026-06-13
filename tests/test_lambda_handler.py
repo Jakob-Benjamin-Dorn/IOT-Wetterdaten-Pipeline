@@ -227,22 +227,22 @@ def test_lambda_handler_returns_500_when_rds_write_fails(monkeypatch):
     assert "Could not write reading to RDS" in body["detail"]
 
 
-def fake_get_latest_readings(limit=10, source=None):
-    assert limit == 10
-    assert source is None
+    def fake_get_latest_readings(limit=10, source=None):
+        assert limit == 10
+        assert source is None
 
-    return [
-        {
-            "source": "sensor",
-            "device_id": "esp32-c6-window-01",
-            "received_at": "2026-06-13T08:00:00+00:00",
-            "temperature_c": 22.1,
-            "humidity_pct": 53.2,
-            "pressure_hpa": 1010.8,
-            "raw_s3_bucket": "weather-raw",
-            "raw_s3_key": "raw_readings/test.json",
-        }
-    ]
+        return [
+            {
+                "source": "sensor",
+                "device_id": "esp32-c6-window-01",
+                "received_at": "2026-06-13T08:00:00+00:00",
+                "temperature_c": 22.1,
+                "humidity_pct": 53.2,
+                "pressure_hpa": 1010.8,
+                "raw_s3_bucket": "weather-raw",
+                "raw_s3_key": "raw_readings/test.json",
+            }
+        ]
 
     monkeypatch.setattr(
         "src.collector.lambda_handler.get_latest_readings",

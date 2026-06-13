@@ -84,3 +84,15 @@ variable "cloud_fallback_schedule_expression" {
   type        = string
   default     = "rate(5 minutes)"
 }
+
+variable "github_repository" {
+  description = "GitHub repository allowed to push the Grafana image via OIDC."
+  type        = string
+  default     = "Jakob-Benjamin-Dorn/IOT-Wetterdaten-Pipeline"
+}
+
+variable "github_branch" {
+  description = "GitHub branch allowed to assume the deployment role."
+  type        = string
+  default     = "main"
+}

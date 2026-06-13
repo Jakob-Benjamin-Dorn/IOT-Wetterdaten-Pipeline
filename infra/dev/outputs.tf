@@ -62,3 +62,8 @@ output "fallback_schedule_name" {
   description = "Name of the EventBridge Scheduler schedule for cloud fallback checks."
   value       = aws_scheduler_schedule.fallback_check.name
 }
+
+output "github_actions_grafana_role_arn" {
+  description = "IAM role ARN assumed by GitHub Actions to push the Grafana image."
+  value       = aws_iam_role.github_actions_grafana_deploy.arn
+}
