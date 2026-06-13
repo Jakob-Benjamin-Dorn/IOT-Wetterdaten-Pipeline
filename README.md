@@ -6,7 +6,7 @@ Portfolio-Projekt für eine kleine IoT-Wetterstation mit lokalem Entwicklungssta
 
 Ein ESP32-C6-Zero mit BME280-Sensor misst Temperatur, Luftfeuchtigkeit und Luftdruck und sendet die Messwerte per HTTP. Lokal nimmt ein FastAPI-Collector die Messwerte entgegen, speichert die Rohdaten in einem S3-kompatiblen Raw-Archiv über LocalStack und legt die validierten Messwerte zusätzlich in PostgreSQL ab. Grafana visualisiert die Messwerte aus PostgreSQL.
 
-Zusätzlich kann eine OpenWeather-basierte Fallback-Quelle genutzt werden, wenn längere Zeit keine aktuellen Sensordaten eintreffen. In AWS ist inzwischen ein schlanker Cloud-Ingestion-Pfad vorhanden: API Gateway nimmt HTTP-Requests entgegen, eine Lambda validiert die Messwerte, prüft einen Header-Token, speichert valide Raw-Payloads in einem echten S3 Raw Bucket und legt normalisierte Messwerte zusätzlich in Amazon RDS PostgreSQL ab.
+Zusätzlich kann eine OpenWeather-basierte Fallback-Quelle genutzt werden, wenn längere Zeit keine aktuellen Sensordaten eintreffen. In AWS ist inzwischen ein schlanker Cloud-Ingestion-Pfad vorhanden: API Gateway nimmt HTTP-Requests entgegen, eine Lambda validiert die Messwerte, prüft einen Header-Token, speichert valide Raw-Payloads in einem echten S3 Raw Bucket und legt normalisierte Messwerte zusätzlich in Amazon RDS PostgreSQL ab. Grafana läuft in der Dev-Umgebung als eigenes Docker-Image aus Amazon ECR auf einer EC2-Instanz und wird per SSM-Port-Forwarding geöffnet.
 
 ## Aktueller Datenfluss
 
@@ -38,6 +38,9 @@ API Gateway HTTP API
 Lambda Collector
         ├── Raw JSON → Amazon S3 Raw Bucket
         └── normalisierte Messwerte → Amazon RDS PostgreSQL
+                                             ↓
+                                      Grafana auf EC2
+                                      Zugriff per SSM-Port-Forwarding
 ```
 
 Token-geschützter Leseendpunkt für Debugging und Smoke-Tests:
@@ -78,9 +81,16 @@ scripts/fallback/
 └── run-fallback-check-loop.sh    # führt die Fallback-Prüfung lokal regelmäßig aus
 
 scripts/cloud/
-├── send-cloud-test-reading.sh    # sendet eine Testmessung an API Gateway/Lambda
-├── list-cloud-raw-objects.sh     # zeigt Raw-Objekte im echten AWS-S3-Bucket
-└── show-latest-readings.sh       # liest die letzten normalisierten Messwerte aus RDS über Lambda
+├── send-cloud-test-reading.sh         # sendet eine Testmessung an API Gateway/Lambda
+├── list-cloud-raw-objects.sh          # zeigt Raw-Objekte im echten AWS-S3-Bucket
+├── show-latest-readings.sh            # liest die letzten normalisierten Messwerte aus RDS über Lambda
+├── build-push-grafana-image.sh        # baut das Grafana-Image und pusht es nach ECR
+└── open-grafana-tunnel.sh             # öffnet Grafana lokal per SSM-Port-Forwarding
+
+docker/grafana/
+├── Dockerfile                         # eigenes Grafana-Image mit Dashboard-Provisioning
+└── provisioning/dashboards/
+    └── dashboards.yml                 # Dashboard-Provider für Grafana
 
 hardware/esp32-wetterstation/
 ├── esp32-wetterstation.ino       # ESP32-C6/BME280-Sketch mit lokalem und Cloud-Ziel
@@ -125,14 +135,17 @@ Bereits umgesetzt:
 * Ein echter ESP32 kann Messwerte an API Gateway/Lambda senden, die im AWS-S3-Raw-Bucket landen.
 * Amazon RDS PostgreSQL ist in der AWS-Dev-Umgebung angebunden.
 * Die Cloud-Lambda läuft in einer VPC und schreibt valide Messwerte zusätzlich normalisiert nach RDS.
-* RDS ist nicht öffentlich erreichbar; PostgreSQL-Zugriff ist per Security Group auf die Lambda beschränkt.
+* RDS ist nicht öffentlich erreichbar; PostgreSQL-Zugriff ist per Security Group auf Lambda und Grafana beschränkt.
 * Ein token-geschützter Read-Endpunkt `/latest-readings` kann die letzten normalisierten Messwerte aus RDS zurückgeben.
+* Grafana läuft in AWS auf einer EC2-Instanz als Docker-Container.
+* Das Grafana-Image wird als eigenes Image gebaut, in Amazon ECR abgelegt und von der EC2 gezogen.
+* Der Zugriff auf Cloud-Grafana erfolgt per SSM-Port-Forwarding; Grafana ist nicht öffentlich erreichbar.
+* Das bestehende Dashboard `grafana/dashboards/iot-wetterstation.json` wird im Grafana-Image provisioniert.
 
 Noch nicht umgesetzt:
 
 * Quarantine-Ablage für ungültige oder unerwartete Payloads
 * Cloud-Fallback über OpenWeather/EventBridge
-* Deployment von Grafana auf ECS/EC2
 * stabile öffentliche Domain für den Sensor
 * AWS IoT Core / MQTT
 
@@ -663,15 +676,17 @@ Der vorbereitete Lambda-Adapter dient dazu, die gleiche Validierungs- und Ingest
 
 Grafana ist von der Datenaufnahme getrennt.
 
-Langfristiges Ziel:
+Aktueller Dev-Stand:
 
 ```text
-Grafana auf ECS/EC2
+Grafana-Docker-Image
+→ Amazon ECR
+→ EC2-Instanz
 → PostgreSQL Datasource
 → Amazon RDS PostgreSQL
 ```
 
-Grafana liest die neuesten Daten also aus RDS. Der Collector muss dafür nicht als dauerhaft laufender Container in AWS betrieben werden, wenn die Datenaufnahme über API Gateway + Lambda erfolgt.
+Der Zugriff auf Grafana erfolgt aktuell nicht öffentlich, sondern lokal per SSM-Port-Forwarding. Grafana liest die neuesten Daten aus RDS. Der Collector muss dafür nicht als dauerhaft laufender Container in AWS betrieben werden, weil die Datenaufnahme über API Gateway + Lambda erfolgt.
 
 ## Infrastruktur-Kategorien
 
@@ -683,7 +698,7 @@ Diese Infrastruktur sollte möglichst stabil bleiben und nicht regelmäßig zers
 * TLS-Zertifikate
 * GitHub OIDC Provider
 * Terraform State Backend
-* ECR Repository für spätere Grafana-Images
+* ECR Repository für das Grafana-Image
 * später eventuell feste DNS-Einträge für den Sensoreingang
 
 ### Umgebungsspezifische Infrastruktur
@@ -801,9 +816,40 @@ Der aktuelle Header-Token schützt sowohl den Schreibpfad `/sensor-readings` als
 
 Für die Dev-Umgebung liegen Datenbankpasswort und Collector-Token aktuell über Terraform-Variablen bzw. Lambda-Environment-Variablen vor. Später können dafür AWS Secrets Manager oder SSM Parameter Store ergänzt werden. RDS Proxy ist ebenfalls mögliche Future Work, falls viele kurzlebige Lambda-Datenbankverbindungen relevant werden.
 
+## Grafana
+
+Grafana läuft in AWS auf einer EC2-Instanz als Docker-Container.
+Der Zugriff erfolgt nicht öffentlich, sondern per SSM-Port-Forwarding.
+Die RDS-Security-Group erlaubt PostgreSQL-Zugriff nur von Lambda und Grafana.
+Das bestehende Dashboard nutzt die Datasource-UID `wetter-postgres` und funktioniert lokal sowie in der Cloud.
+
+Das Cloud-Grafana-Image wird aus dem Repository gebaut und nach Amazon ECR gepusht:
+
+```bash
+export AWS_PROFILE=iot-dev
+./scripts/cloud/build-push-grafana-image.sh
+```
+
+Der Zugriff auf Grafana erfolgt über einen lokalen SSM-Tunnel:
+
+```bash
+export AWS_PROFILE=iot-dev
+./scripts/cloud/open-grafana-tunnel.sh
+```
+
+Standardmäßig öffnet das Skript Grafana lokal unter:
+
+```text
+http://localhost:3001
+```
+
+Das Dashboard wird im Grafana-Image provisioniert. Die Cloud-Datasource wird auf der EC2 über die Terraform-User-Data erzeugt, weil Host, Datenbankname und Passwort umgebungsspezifisch sind.
+
 ### Kosten- und Destroy-Hinweis für AWS-Dev
 
-API Gateway, Lambda und S3 verursachen bei diesem kleinen Dev-Setup überwiegend nutzungsabhängige bzw. sehr geringe Kosten. RDS ist dagegen eine dauerhaft laufende Datenbankressource und sollte in der Dev-Umgebung nicht unnötig laufen, wenn nicht aktiv daran gearbeitet wird.
+API Gateway, Lambda und S3 verursachen bei diesem kleinen Dev-Setup überwiegend nutzungsabhängige bzw. sehr geringe Kosten. RDS und EC2 sind dagegen dauerhaft laufende Ressourcen und verursachen auch ohne aktive Abfragen Kosten, solange sie laufen.
+
+Für kurze Arbeitspausen kann es sinnvoll sein, die Dev-Umgebung stehen zu lassen, damit RDS-Daten, Grafana und Dashboard-Zustand erhalten bleiben. Für längere Pausen ist `terraform destroy` günstiger. Ein späterer Neuaufbau aus S3 Raw-Daten ist möglich, solange der Raw Bucket nicht gelöscht wurde und ein Rebuild-Skript vorhanden ist. Aktuell löscht `terraform destroy` jedoch auch den von Terraform verwalteten S3 Raw Bucket; Raw-Daten sollten daher vorher gesichert oder der Bucket bewusst aus dem Destroy-Pfad herausgenommen werden, wenn sie erhalten bleiben sollen.
 
 Vor längeren Pausen kann die Dev-Umgebung zerstört werden:
 
@@ -814,7 +860,7 @@ terraform plan -destroy
 terraform destroy
 ```
 
-Achtung: `terraform destroy` entfernt alle von dieser Terraform-Konfiguration verwalteten Ressourcen. Dazu gehören aktuell auch API Gateway, Lambda und der S3 Raw Bucket. Raw-Daten im S3 Bucket gehen dabei verloren, sofern sie vorher nicht gesichert wurden.
+Achtung: `terraform destroy` entfernt alle von dieser Terraform-Konfiguration verwalteten Ressourcen. Dazu gehören aktuell auch API Gateway, Lambda, RDS, Grafana-EC2 und der S3 Raw Bucket. Raw-Daten im S3 Bucket gehen dabei verloren, sofern sie vorher nicht gesichert wurden.
 
 
 ## Future Work
@@ -826,6 +872,9 @@ Mögliche spätere Erweiterungen:
 * Device-Zertifikate
 * IoT Rules
 * vollständig automatisiertes AWS-Deployment mit Terraform
-* Grafana-Deployment auf ECS/EC2
+* GitHub Actions für Grafana-Image-Build und ECR-Push
+* optionaler Neustart der Grafana-EC2 per SSM nach neuem Image-Push
+* optionaler späterer Wechsel von EC2 zu ECS/Fargate oder ALB/Domain
 * AWS Secrets Manager oder SSM Parameter Store für Secrets
 * RDS Proxy für robustere Lambda/RDS-Verbindungen
+* Rebuild-Skript, das normalisierte RDS-Daten bei Bedarf aus S3 Raw-Daten wiederherstellt

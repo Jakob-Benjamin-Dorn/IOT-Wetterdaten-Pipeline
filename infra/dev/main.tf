@@ -154,6 +154,14 @@ resource "aws_security_group" "rds" {
     security_groups = [aws_security_group.lambda.id]
   }
 
+  ingress {
+    description     = "Allow PostgreSQL from Grafana EC2"
+    from_port       = 5432
+    to_port         = 5432
+    protocol        = "tcp"
+    security_groups = [aws_security_group.grafana.id]
+  }
+
   tags = local.common_tags
 }
 
@@ -199,6 +207,251 @@ resource "aws_db_instance" "postgres" {
       Name = "${var.project_name}-${var.environment}-postgres"
     }
   )
+}
+
+data "aws_ami" "amazon_linux_2023_x86_64" {
+  most_recent = true
+  owners      = ["amazon"]
+
+  filter {
+    name   = "name"
+    values = ["al2023-ami-2023.*-x86_64"]
+  }
+
+  filter {
+    name   = "architecture"
+    values = ["x86_64"]
+  }
+
+  filter {
+    name   = "virtualization-type"
+    values = ["hvm"]
+  }
+}
+
+resource "aws_internet_gateway" "dev" {
+  vpc_id = aws_vpc.dev.id
+
+  tags = merge(
+    local.common_tags,
+    {
+      Name = "${var.project_name}-${var.environment}-igw"
+    }
+  )
+}
+
+resource "aws_subnet" "public_grafana" {
+  vpc_id                  = aws_vpc.dev.id
+  cidr_block              = "10.20.10.0/24"
+  availability_zone       = data.aws_availability_zones.available.names[0]
+  map_public_ip_on_launch = true
+
+  tags = merge(
+    local.common_tags,
+    {
+      Name = "${var.project_name}-${var.environment}-public-grafana"
+    }
+  )
+}
+
+resource "aws_route_table" "public" {
+  vpc_id = aws_vpc.dev.id
+
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.dev.id
+  }
+
+  tags = merge(
+    local.common_tags,
+    {
+      Name = "${var.project_name}-${var.environment}-public-rt"
+    }
+  )
+}
+
+resource "aws_route_table_association" "public_grafana" {
+  subnet_id      = aws_subnet.public_grafana.id
+  route_table_id = aws_route_table.public.id
+}
+
+resource "aws_security_group" "grafana" {
+  name        = "${var.project_name}-${var.environment}-grafana-sg"
+  description = "Security group for private Grafana EC2 access via SSM only"
+  vpc_id      = aws_vpc.dev.id
+
+  egress {
+    description = "Allow outbound traffic from Grafana"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = local.common_tags
+}
+
+resource "aws_iam_role" "grafana_ec2" {
+  name = "${var.project_name}-${var.environment}-grafana-ec2-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "ec2.amazonaws.com"
+        }
+      }
+    ]
+  })
+
+  tags = local.common_tags
+}
+
+resource "aws_iam_role_policy_attachment" "grafana_ec2_ssm" {
+  role       = aws_iam_role.grafana_ec2.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+resource "aws_iam_instance_profile" "grafana_ec2" {
+  name = "${var.project_name}-${var.environment}-grafana-ec2-profile"
+  role = aws_iam_role.grafana_ec2.name
+
+  tags = local.common_tags
+}
+
+resource "aws_instance" "grafana" {
+  ami                    = data.aws_ami.amazon_linux_2023_x86_64.id
+  instance_type          = "t3.micro"
+  subnet_id              = aws_subnet.public_grafana.id
+  vpc_security_group_ids = [aws_security_group.grafana.id]
+  iam_instance_profile   = aws_iam_instance_profile.grafana_ec2.name
+
+  user_data_replace_on_change = true
+
+  user_data = <<-EOF
+    #!/bin/bash
+    set -euxo pipefail
+
+    dnf update -y
+    dnf install -y docker unzip
+
+    if ! command -v aws >/dev/null 2>&1; then
+      curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip
+      unzip -q /tmp/awscliv2.zip -d /tmp
+      /tmp/aws/install
+    fi
+
+    systemctl enable docker
+    systemctl start docker
+
+    systemctl enable amazon-ssm-agent
+    systemctl start amazon-ssm-agent
+
+    mkdir -p /opt/grafana/provisioning/datasources
+
+    cat > /opt/grafana/provisioning/datasources/rds-postgres.yml <<'DATASOURCE'
+    apiVersion: 1
+
+    deleteDatasources:
+      - name: AWS RDS PostgreSQL
+        orgId: 1
+
+    datasources:
+      - name: Wetter PostgreSQL
+        uid: wetter-postgres
+        type: postgres
+        access: proxy
+        url: ${aws_db_instance.postgres.address}:5432
+        user: ${var.db_username}
+        secureJsonData:
+          password: ${var.db_password}
+        jsonData:
+          database: ${var.db_name}
+          sslmode: require
+          postgresVersion: 1600
+          timescaledb: false
+        isDefault: true
+        editable: true
+    DATASOURCE
+
+    aws ecr get-login-password --region ${var.aws_region} \
+      | docker login \
+          --username AWS \
+          --password-stdin ${split("/", aws_ecr_repository.grafana.repository_url)[0]}
+
+    docker pull ${aws_ecr_repository.grafana.repository_url}:latest
+    
+    docker volume create grafana-data || true
+
+    docker rm -f grafana || true
+
+    docker run -d \
+      --name grafana \
+      --restart unless-stopped \
+      -p 127.0.0.1:3000:3000 \
+      -v grafana-data:/var/lib/grafana \
+      -v /opt/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro \
+      -e GF_SECURITY_ADMIN_USER=admin \
+      -e GF_SECURITY_ADMIN_PASSWORD='${var.grafana_admin_password}' \
+      -e GF_USERS_ALLOW_SIGN_UP=false \
+      -e GF_AUTH_ANONYMOUS_ENABLED=false \
+      ${aws_ecr_repository.grafana.repository_url}:latest
+  EOF
+
+  depends_on = [
+    aws_iam_role_policy.grafana_ec2_ecr_pull,
+    aws_ecr_repository.grafana
+  ]
+
+  tags = merge(
+    local.common_tags,
+    {
+      Name = "${var.project_name}-${var.environment}-grafana"
+    }
+  )
+}
+
+resource "aws_ecr_repository" "grafana" {
+  name                 = "${var.project_name}-${var.environment}-grafana"
+  image_tag_mutability = "MUTABLE"
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+
+  force_delete = true
+
+  tags = local.common_tags
+}
+
+resource "aws_iam_role_policy" "grafana_ec2_ecr_pull" {
+  name = "${var.project_name}-${var.environment}-grafana-ecr-pull"
+  role = aws_iam_role.grafana_ec2.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "ecr:GetAuthorizationToken"
+        ]
+        Resource = "*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:BatchGetImage",
+          "ecr:GetDownloadUrlForLayer"
+        ]
+        Resource = aws_ecr_repository.grafana.arn
+      }
+    ]
+  })
 }
 
 resource "aws_iam_role" "collector_lambda" {

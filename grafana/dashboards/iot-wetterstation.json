@@ -52,7 +52,7 @@
             },
             "options": {
                 "mode": "markdown",
-                "content": "# IoT-Wetterstation\n\nKarlsruhe-Wetterdaten als Near-Realtime-Messungen vom ESP32-C6-Zero mit BME280-Sensor.\n\nGemessen werden Temperatur, Luftfeuchtigkeit und Luftdruck. Die Rohdaten werden lokal in LocalStack-S3 archiviert und validierte Messwerte in PostgreSQL gespeichert."
+                "content": "# IoT-Wetterstation\n\nKarlsruhe-Wetterdaten als Near-Realtime-Messungen vom ESP32-C6-Zero mit BME280-Sensor.\n\nGemessen werden Temperatur, Luftfeuchtigkeit und Luftdruck. Die Rohdaten werden in AWS S3 archiviert und validierte Messwerte in RDS PostgreSQL gespeichert."
             }
         },
         {
