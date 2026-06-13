@@ -20,9 +20,15 @@
 // Sendeintervall
 const unsigned long SEND_INTERVAL_MS = 60000;
 
+// Timeouts / Recovery
+const unsigned long WIFI_CONNECT_TIMEOUT_MS = 20000;
+const unsigned long HTTP_TIMEOUT_MS = 10000;
+const int MAX_CONSECUTIVE_SEND_FAILURES = 5;
+
 Adafruit_BME280 bme;
 
 unsigned long lastSendAt = 0;
+int consecutiveSendFailures = 0;
 
 
 const char* getCollectorUrl() {
@@ -43,16 +49,38 @@ const char* getCollectorToken() {
 }
 
 
+void printStartupConfig() {
+  Serial.println("--- Konfiguration ---");
+  Serial.print("Modus: ");
+  Serial.println(USE_CLOUD ? "CLOUD" : "LOCAL");
+
+  Serial.print("Device ID: ");
+  Serial.println(DEVICE_ID);
+
+  Serial.print("Collector URL: ");
+  Serial.println(getCollectorUrl());
+
+  Serial.print("Sendeintervall ms: ");
+  Serial.println(SEND_INTERVAL_MS);
+
+  Serial.print("Max. aufeinanderfolgende Sendefehler: ");
+  Serial.println(MAX_CONSECUTIVE_SEND_FAILURES);
+}
+
+
 void connectToWifi() {
   Serial.print("Verbinde mit WLAN: ");
   Serial.println(WIFI_SSID);
 
+  WiFi.persistent(false);
   WiFi.mode(WIFI_STA);
+  WiFi.setSleep(false);
+  WiFi.setAutoReconnect(true);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
   unsigned long startAttempt = millis();
 
-  while (WiFi.status() != WL_CONNECTED && millis() - startAttempt < 20000) {
+  while (WiFi.status() != WL_CONNECTED && millis() - startAttempt < WIFI_CONNECT_TIMEOUT_MS) {
     delay(500);
     Serial.print(".");
   }
@@ -120,7 +148,31 @@ bool isHttpsUrl(const char* url) {
 }
 
 
-void executePost(HTTPClient& http, const String& payload, const char* collectorToken) {
+void handleSendResult(bool success) {
+  if (success) {
+    if (consecutiveSendFailures > 0) {
+      Serial.println("Senden wieder erfolgreich. Fehlerzähler wird zurückgesetzt.");
+    }
+
+    consecutiveSendFailures = 0;
+    return;
+  }
+
+  consecutiveSendFailures++;
+
+  Serial.print("Sendeversuch fehlgeschlagen. Fehler in Folge: ");
+  Serial.println(consecutiveSendFailures);
+
+  if (consecutiveSendFailures >= MAX_CONSECUTIVE_SEND_FAILURES) {
+    Serial.println("Zu viele aufeinanderfolgende Sendefehler. Neustart in 3 Sekunden...");
+    delay(3000);
+    ESP.restart();
+  }
+}
+
+
+bool executePost(HTTPClient& http, const String& payload, const char* collectorToken) {
+  http.setTimeout(HTTP_TIMEOUT_MS);
   http.addHeader("Content-Type", "application/json");
 
   if (String(collectorToken).length() > 0) {
@@ -136,6 +188,8 @@ void executePost(HTTPClient& http, const String& payload, const char* collectorT
 
   Serial.print("Response: ");
   Serial.println(response);
+
+  return httpCode >= 200 && httpCode < 300;
 }
 
 
@@ -179,6 +233,7 @@ void sendReading() {
   Serial.println(payload);
 
   HTTPClient http;
+  bool success = false;
 
   if (isHttpsUrl(collectorUrl)) {
     WiFiClientSecure secureClient;
@@ -189,11 +244,13 @@ void sendReading() {
 
     if (!http.begin(secureClient, collectorUrl)) {
       Serial.println("HTTPS-Verbindung konnte nicht initialisiert werden.");
+      handleSendResult(false);
       return;
     }
 
-    executePost(http, payload, collectorToken);
+    success = executePost(http, payload, collectorToken);
     http.end();
+    handleSendResult(success);
 
     return;
   }
@@ -202,11 +259,13 @@ void sendReading() {
 
   if (!http.begin(client, collectorUrl)) {
     Serial.println("HTTP-Verbindung konnte nicht initialisiert werden.");
+    handleSendResult(false);
     return;
   }
 
-  executePost(http, payload, collectorToken);
+  success = executePost(http, payload, collectorToken);
   http.end();
+  handleSendResult(success);
 }
 
 
@@ -217,6 +276,7 @@ void setup() {
   Serial.println();
   Serial.println("ESP32-C6 Wetterstation startet...");
 
+  printStartupConfig();
   setupBme280();
   connectToWifi();
 
