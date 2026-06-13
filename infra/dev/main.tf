@@ -377,13 +377,12 @@ resource "aws_instance" "grafana" {
         editable: true
     DATASOURCE
 
-    aws ecr get-login-password --region ${var.aws_region} \
-      | docker login \
-          --username AWS \
-          --password-stdin ${split("/", aws_ecr_repository.grafana.repository_url)[0]}
+    cat > /opt/grafana/run-grafana.sh <<'RUN_GRAFANA'
+    #!/usr/bin/env bash
+    set -euxo pipefail
 
-    docker pull ${aws_ecr_repository.grafana.repository_url}:latest
-    
+    IMAGE_URI="$${1:?Usage: run-grafana.sh <image-uri>}"
+
     docker volume create grafana-data || true
 
     docker rm -f grafana || true
@@ -398,7 +397,25 @@ resource "aws_instance" "grafana" {
       -e GF_SECURITY_ADMIN_PASSWORD='${var.grafana_admin_password}' \
       -e GF_USERS_ALLOW_SIGN_UP=false \
       -e GF_AUTH_ANONYMOUS_ENABLED=false \
-      ${aws_ecr_repository.grafana.repository_url}:latest
+      "$IMAGE_URI"
+    RUN_GRAFANA
+
+    chmod +x /opt/grafana/run-grafana.sh
+
+    IMAGE_URI="${aws_ecr_repository.grafana.repository_url}:latest"
+    ECR_REGISTRY="${split("/", aws_ecr_repository.grafana.repository_url)[0]}"
+
+    aws ecr get-login-password --region ${var.aws_region} \
+      | docker login \
+          --username AWS \
+          --password-stdin "$ECR_REGISTRY"
+
+    docker pull "$IMAGE_URI"
+
+    /opt/grafana/run-grafana.sh "$IMAGE_URI"
+
+    sleep 10
+    curl -f http://127.0.0.1:3000/api/health || docker logs grafana --tail 100
   EOF
 
   depends_on = [
@@ -757,6 +774,37 @@ resource "aws_iam_role" "github_actions_grafana_deploy" {
   })
 
   tags = local.common_tags
+}
+
+resource "aws_iam_role_policy" "github_actions_grafana_ssm_restart" {
+  name = "${var.project_name}-${var.environment}-github-actions-grafana-ssm-restart"
+  role = aws_iam_role.github_actions_grafana_deploy.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "ssm:SendCommand"
+        ]
+        Resource = [
+          "arn:aws:ssm:${var.aws_region}::document/AWS-RunShellScript",
+          aws_instance.grafana.arn
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "ssm:GetCommandInvocation",
+          "ssm:ListCommandInvocations",
+          "ssm:DescribeInstanceInformation",
+          "ec2:DescribeInstances"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
 }
 
 resource "aws_iam_role_policy" "github_actions_grafana_ecr_push" {
