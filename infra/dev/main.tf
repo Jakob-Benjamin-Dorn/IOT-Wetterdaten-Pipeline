@@ -519,12 +519,13 @@ resource "aws_lambda_function" "collector" {
   runtime       = "python3.13"
   handler       = "src.collector.lambda_handler.lambda_handler"
 
+  reserved_concurrent_executions = var.collector_reserved_concurrency
+
   filename         = local.lambda_package_path
   source_code_hash = filebase64sha256(local.lambda_package_path)
 
   memory_size = 128
   timeout     = 10
-
   vpc_config {
     subnet_ids = [
       aws_subnet.private_a.id,
@@ -589,10 +590,33 @@ resource "aws_apigatewayv2_route" "sensor_readings" {
   target    = "integrations/${aws_apigatewayv2_integration.collector_lambda.id}"
 }
 
-resource "aws_apigatewayv2_stage" "dev" {
+resource "aws_apigatewayv2_stage" "collector" {
   api_id      = aws_apigatewayv2_api.collector.id
   name        = "$default"
   auto_deploy = true
+
+  default_route_settings {
+    throttling_rate_limit  = var.api_default_throttling_rate_limit
+    throttling_burst_limit = var.api_default_throttling_burst_limit
+  }
+
+  route_settings {
+    route_key              = "POST /sensor-readings"
+    throttling_rate_limit  = var.api_sensor_throttling_rate_limit
+    throttling_burst_limit = var.api_sensor_throttling_burst_limit
+  }
+
+  route_settings {
+    route_key              = "POST /fallback-readings"
+    throttling_rate_limit  = var.api_sensor_throttling_rate_limit
+    throttling_burst_limit = var.api_sensor_throttling_burst_limit
+  }
+
+  route_settings {
+    route_key              = "GET /latest-readings"
+    throttling_rate_limit  = var.api_read_throttling_rate_limit
+    throttling_burst_limit = var.api_read_throttling_burst_limit
+  }
 
   tags = local.common_tags
 }
@@ -646,6 +670,8 @@ resource "aws_lambda_function" "fallback" {
   role          = aws_iam_role.fallback_lambda.arn
   runtime       = "python3.13"
   handler       = "src.collector.fallback_lambda_handler.lambda_handler"
+
+  reserved_concurrent_executions = var.fallback_reserved_concurrency
 
   filename         = local.lambda_package_path
   source_code_hash = filebase64sha256(local.lambda_package_path)
@@ -838,4 +864,36 @@ resource "aws_iam_role_policy" "github_actions_grafana_ecr_push" {
       }
     ]
   })
+}
+
+resource "aws_budgets_budget" "monthly_dev_cost" {
+  name         = "${var.project_name}-${var.environment}-monthly-cost"
+  budget_type  = "COST"
+  limit_amount = var.monthly_budget_limit_usd
+  limit_unit   = "USD"
+  time_unit    = "MONTHLY"
+
+  notification {
+    comparison_operator        = "GREATER_THAN"
+    threshold                  = 50
+    threshold_type             = "PERCENTAGE"
+    notification_type          = "ACTUAL"
+    subscriber_email_addresses = [var.budget_alert_email]
+  }
+
+  notification {
+    comparison_operator        = "GREATER_THAN"
+    threshold                  = 80
+    threshold_type             = "PERCENTAGE"
+    notification_type          = "ACTUAL"
+    subscriber_email_addresses = [var.budget_alert_email]
+  }
+
+  notification {
+    comparison_operator        = "GREATER_THAN"
+    threshold                  = 100
+    threshold_type             = "PERCENTAGE"
+    notification_type          = "FORECASTED"
+    subscriber_email_addresses = [var.budget_alert_email]
+  }
 }
