@@ -37,3 +37,13 @@ output "postgres_username" {
   description = "RDS PostgreSQL username."
   value       = aws_db_instance.postgres.username
 }
+
+output "grafana_instance_id" {
+  description = "EC2 instance ID for the private Grafana instance."
+  value       = aws_instance.grafana.id
+}
+
+output "grafana_ssm_port_forward_command" {
+  description = "Command to open Grafana locally through SSM port forwarding."
+  value       = "aws ssm start-session --target ${aws_instance.grafana.id} --document-name AWS-StartPortForwardingSession --parameters '{\"portNumber\":[\"3000\"],\"localPortNumber\":[\"3000\"]}' --profile iot-dev"
+}
