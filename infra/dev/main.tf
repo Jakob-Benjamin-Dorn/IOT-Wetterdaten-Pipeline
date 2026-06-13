@@ -402,8 +402,8 @@ resource "aws_instance" "grafana" {
 
     chmod +x /opt/grafana/run-grafana.sh
 
-    IMAGE_URI="${aws_ecr_repository.grafana.repository_url}:latest"
-    ECR_REGISTRY="${split("/", aws_ecr_repository.grafana.repository_url)[0]}"
+    IMAGE_URI="${data.terraform_remote_state.bootstrap.outputs.grafana_ecr_repository_url}:latest"
+    ECR_REGISTRY="${split("/", data.terraform_remote_state.bootstrap.outputs.grafana_ecr_repository_url)[0]}"
 
     aws ecr get-login-password --region ${var.aws_region} \
       | docker login \
@@ -419,8 +419,7 @@ resource "aws_instance" "grafana" {
   EOF
 
   depends_on = [
-    aws_iam_role_policy.grafana_ec2_ecr_pull,
-    aws_ecr_repository.grafana
+    aws_iam_role_policy.grafana_ec2_ecr_pull
   ]
 
   tags = merge(
@@ -429,19 +428,6 @@ resource "aws_instance" "grafana" {
       Name = "${var.project_name}-${var.environment}-grafana"
     }
   )
-}
-
-resource "aws_ecr_repository" "grafana" {
-  name                 = "${var.project_name}-${var.environment}-grafana"
-  image_tag_mutability = "MUTABLE"
-
-  image_scanning_configuration {
-    scan_on_push = true
-  }
-
-  force_delete = true
-
-  tags = local.common_tags
 }
 
 resource "aws_iam_role_policy" "grafana_ec2_ecr_pull" {
@@ -465,7 +451,7 @@ resource "aws_iam_role_policy" "grafana_ec2_ecr_pull" {
           "ecr:BatchGetImage",
           "ecr:GetDownloadUrlForLayer"
         ]
-        Resource = aws_ecr_repository.grafana.arn
+        Resource = data.terraform_remote_state.bootstrap.outputs.grafana_ecr_repository_arn
       }
     ]
   })
@@ -758,142 +744,3 @@ resource "aws_scheduler_schedule" "fallback_check" {
 }
 
 data "aws_caller_identity" "current" {}
-
-resource "aws_iam_openid_connect_provider" "github" {
-  url = "https://token.actions.githubusercontent.com"
-
-  client_id_list = [
-    "sts.amazonaws.com"
-  ]
-
-  # Terraform requires this argument. AWS/GitHub OIDC no longer depends on
-  # a pinned thumbprint for this provider; the value is effectively legacy.
-  thumbprint_list = [
-    "6938fd4d98bab03faadb97b34396831e3780aea1"
-  ]
-
-  tags = local.common_tags
-}
-
-resource "aws_iam_role" "github_actions_grafana_deploy" {
-  name = "${var.project_name}-${var.environment}-github-actions-grafana-deploy"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = "sts:AssumeRoleWithWebIdentity"
-        Principal = {
-          Federated = aws_iam_openid_connect_provider.github.arn
-        }
-        Condition = {
-          StringEquals = {
-            "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
-          }
-          StringLike = {
-            "token.actions.githubusercontent.com:sub" = "repo:${var.github_repository}:ref:refs/heads/${var.github_branch}"
-          }
-        }
-      }
-    ]
-  })
-
-  tags = local.common_tags
-}
-
-resource "aws_iam_role_policy" "github_actions_grafana_ssm_restart" {
-  name = "${var.project_name}-${var.environment}-github-actions-grafana-ssm-restart"
-  role = aws_iam_role.github_actions_grafana_deploy.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "ssm:SendCommand"
-        ]
-        Resource = [
-          "arn:aws:ssm:${var.aws_region}::document/AWS-RunShellScript",
-          aws_instance.grafana.arn
-        ]
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "ssm:GetCommandInvocation",
-          "ssm:ListCommandInvocations",
-          "ssm:DescribeInstanceInformation",
-          "ec2:DescribeInstances"
-        ]
-        Resource = "*"
-      }
-    ]
-  })
-}
-
-resource "aws_iam_role_policy" "github_actions_grafana_ecr_push" {
-  name = "${var.project_name}-${var.environment}-github-actions-grafana-ecr-push"
-  role = aws_iam_role.github_actions_grafana_deploy.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "ecr:GetAuthorizationToken"
-        ]
-        Resource = "*"
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "ecr:BatchCheckLayerAvailability",
-          "ecr:BatchGetImage",
-          "ecr:CompleteLayerUpload",
-          "ecr:DescribeImages",
-          "ecr:DescribeRepositories",
-          "ecr:GetDownloadUrlForLayer",
-          "ecr:InitiateLayerUpload",
-          "ecr:PutImage",
-          "ecr:UploadLayerPart"
-        ]
-        Resource = aws_ecr_repository.grafana.arn
-      }
-    ]
-  })
-}
-
-resource "aws_budgets_budget" "monthly_dev_cost" {
-  name         = "${var.project_name}-${var.environment}-monthly-cost"
-  budget_type  = "COST"
-  limit_amount = var.monthly_budget_limit_usd
-  limit_unit   = "USD"
-  time_unit    = "MONTHLY"
-
-  notification {
-    comparison_operator        = "GREATER_THAN"
-    threshold                  = 50
-    threshold_type             = "PERCENTAGE"
-    notification_type          = "ACTUAL"
-    subscriber_email_addresses = [var.budget_alert_email]
-  }
-
-  notification {
-    comparison_operator        = "GREATER_THAN"
-    threshold                  = 80
-    threshold_type             = "PERCENTAGE"
-    notification_type          = "ACTUAL"
-    subscriber_email_addresses = [var.budget_alert_email]
-  }
-
-  notification {
-    comparison_operator        = "GREATER_THAN"
-    threshold                  = 100
-    threshold_type             = "PERCENTAGE"
-    notification_type          = "FORECASTED"
-    subscriber_email_addresses = [var.budget_alert_email]
-  }
-}
