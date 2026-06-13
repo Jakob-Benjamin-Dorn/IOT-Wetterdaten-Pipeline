@@ -85,18 +85,6 @@ variable "cloud_fallback_schedule_expression" {
   default     = "rate(5 minutes)"
 }
 
-variable "github_repository" {
-  description = "GitHub repository allowed to push the Grafana image via OIDC."
-  type        = string
-  default     = "Jakob-Benjamin-Dorn/IOT-Wetterdaten-Pipeline"
-}
-
-variable "github_branch" {
-  description = "GitHub branch allowed to assume the deployment role."
-  type        = string
-  default     = "main"
-}
-
 variable "api_default_throttling_rate_limit" {
   description = "Default steady-state requests per second for the HTTP API stage."
   type        = number
@@ -143,15 +131,4 @@ variable "fallback_reserved_concurrency" {
   description = "Maximum concurrent executions for the fallback Lambda."
   type        = number
   default     = 1
-}
-
-variable "monthly_budget_limit_usd" {
-  description = "Monthly AWS budget limit for this dev account/project."
-  type        = string
-  default     = "15"
-}
-
-variable "budget_alert_email" {
-  description = "Email address for AWS Budget alerts."
-  type        = string
 }

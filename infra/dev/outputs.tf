@@ -50,7 +50,7 @@ output "grafana_ssm_port_forward_command" {
 
 output "grafana_ecr_repository_url" {
   description = "ECR repository URL for the Grafana image."
-  value       = aws_ecr_repository.grafana.repository_url
+  value       = data.terraform_remote_state.bootstrap.outputs.grafana_ecr_repository_url
 }
 
 output "fallback_lambda_function_name" {
@@ -64,6 +64,6 @@ output "fallback_schedule_name" {
 }
 
 output "github_actions_grafana_role_arn" {
-  description = "IAM role ARN assumed by GitHub Actions to push the Grafana image."
-  value       = aws_iam_role.github_actions_grafana_deploy.arn
+  description = "IAM role ARN assumed by GitHub Actions to build, push and restart Grafana."
+  value       = data.terraform_remote_state.bootstrap.outputs.github_actions_grafana_role_arn
 }
