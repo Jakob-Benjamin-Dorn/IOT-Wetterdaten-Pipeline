@@ -108,7 +108,7 @@ def insert_normalized_reading(reading: NormalizedReading) -> None:
         raise CollectorStorageError(f"Could not write reading to RDS: {exc}") from exc
 
 
-def get_latest_readings(limit: int = 10) -> list[dict]:
+def get_latest_readings(limit: int = 10, source: str | None = None) -> list[dict]:
     safe_limit = max(1, min(limit, 100))
 
     try:
@@ -116,23 +116,43 @@ def get_latest_readings(limit: int = 10) -> list[dict]:
             ensure_schema_exists(conn)
 
             with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT
-                        source,
-                        device_id,
-                        received_at,
-                        temperature_c,
-                        humidity_pct,
-                        pressure_hpa,
-                        raw_s3_bucket,
-                        raw_s3_key
-                    FROM weather_readings
-                    ORDER BY received_at DESC
-                    LIMIT %s
-                    """,
-                    (safe_limit,),
-                )
+                if source:
+                    cur.execute(
+                        """
+                        SELECT
+                            source,
+                            device_id,
+                            received_at,
+                            temperature_c,
+                            humidity_pct,
+                            pressure_hpa,
+                            raw_s3_bucket,
+                            raw_s3_key
+                        FROM weather_readings
+                        WHERE source = %s
+                        ORDER BY received_at DESC
+                        LIMIT %s
+                        """,
+                        (source, safe_limit),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        SELECT
+                            source,
+                            device_id,
+                            received_at,
+                            temperature_c,
+                            humidity_pct,
+                            pressure_hpa,
+                            raw_s3_bucket,
+                            raw_s3_key
+                        FROM weather_readings
+                        ORDER BY received_at DESC
+                        LIMIT %s
+                        """,
+                        (safe_limit,),
+                    )
 
                 rows = cur.fetchall()
 

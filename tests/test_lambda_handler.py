@@ -61,6 +61,53 @@ def test_lambda_handler_accepts_valid_sensor_payload(monkeypatch):
     assert body["source"] == "sensor"
 
 
+def test_lambda_handler_accepts_fallback_payload(monkeypatch):
+    def fake_store_raw_reading(**kwargs):
+        return RawStorageResult(
+            status="accepted",
+            source=kwargs["source"],
+            bucket="weather-raw",
+            key="raw_readings/openweather-test.json",
+            received_at=datetime(2026, 6, 13, 12, 0, tzinfo=timezone.utc),
+        )
+
+    def fake_insert_normalized_reading(reading):
+        assert reading.source == "openweather"
+        assert reading.device_id == "openweather-reference"
+        assert reading.temperature_c == 22.5
+
+    monkeypatch.setattr(
+        "src.collector.lambda_handler.store_raw_reading",
+        fake_store_raw_reading,
+    )
+    monkeypatch.setattr(
+        "src.collector.lambda_handler.insert_normalized_reading",
+        fake_insert_normalized_reading,
+    )
+    monkeypatch.setenv("COLLECTOR_TOKEN", "test-token")
+
+    event = {
+        "headers": {"x-collector-token": "test-token"},
+        "requestContext": {"http": {"method": "POST"}},
+        "rawPath": "/fallback-readings",
+        "body": json.dumps(
+            {
+                "temperature_c": 22.5,
+                "humidity_pct": 50.0,
+                "pressure_hpa": 1010.0,
+                "location": "openweather-reference",
+                "openweather_raw": {"main": {"temp": 22.5}},
+            }
+        ),
+    }
+
+    result = lambda_handler(event, None)
+    body = json.loads(result["body"])
+
+    assert result["statusCode"] == 202
+    assert body["source"] == "openweather"
+
+
 def test_lambda_handler_rejects_invalid_json(monkeypatch):
     monkeypatch.setenv("COLLECTOR_TOKEN", "test-token")
 
@@ -180,10 +227,10 @@ def test_lambda_handler_returns_500_when_rds_write_fails(monkeypatch):
     assert "Could not write reading to RDS" in body["detail"]
 
 
-def test_lambda_handler_returns_latest_readings(monkeypatch):
-    monkeypatch.setenv("COLLECTOR_TOKEN", "test-token")
+    def fake_get_latest_readings(limit=10, source=None):
+        assert limit == 10
+        assert source is None
 
-    def fake_get_latest_readings(limit=10):
         return [
             {
                 "source": "sensor",

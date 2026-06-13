@@ -593,3 +593,201 @@ resource "aws_apigatewayv2_route" "latest_readings" {
   route_key = "GET /latest-readings"
   target    = "integrations/${aws_apigatewayv2_integration.collector_lambda.id}"
 }
+
+resource "aws_apigatewayv2_route" "fallback_readings" {
+  api_id    = aws_apigatewayv2_api.collector.id
+  route_key = "POST /fallback-readings"
+  target    = "integrations/${aws_apigatewayv2_integration.collector_lambda.id}"
+}
+
+resource "aws_iam_role" "fallback_lambda" {
+  name = "${var.project_name}-${var.environment}-fallback-lambda-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "lambda.amazonaws.com"
+        }
+      }
+    ]
+  })
+
+  tags = local.common_tags
+}
+
+resource "aws_iam_role_policy_attachment" "fallback_lambda_basic_execution" {
+  role       = aws_iam_role.fallback_lambda.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+resource "aws_lambda_function" "fallback" {
+  function_name = "${var.project_name}-${var.environment}-fallback"
+  role          = aws_iam_role.fallback_lambda.arn
+  runtime       = "python3.13"
+  handler       = "src.collector.fallback_lambda_handler.lambda_handler"
+
+  filename         = local.lambda_package_path
+  source_code_hash = filebase64sha256(local.lambda_package_path)
+
+  memory_size = 128
+  timeout     = 30
+
+  environment {
+    variables = {
+      COLLECTOR_API_ENDPOINT     = aws_apigatewayv2_api.collector.api_endpoint
+      COLLECTOR_TOKEN            = var.collector_token
+      FALLBACK_THRESHOLD_SECONDS = tostring(var.cloud_fallback_threshold_seconds)
+      OPENWEATHER_API_KEY        = var.openweather_api_key
+      OPENWEATHER_LAT            = var.openweather_lat
+      OPENWEATHER_LON            = var.openweather_lon
+      OPENWEATHER_LOCATION       = var.openweather_location
+    }
+  }
+
+  depends_on = [
+    aws_iam_role_policy_attachment.fallback_lambda_basic_execution
+  ]
+
+  tags = local.common_tags
+}
+
+resource "aws_iam_role" "fallback_scheduler" {
+  name = "${var.project_name}-${var.environment}-fallback-scheduler-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "scheduler.amazonaws.com"
+        }
+      }
+    ]
+  })
+
+  tags = local.common_tags
+}
+
+resource "aws_iam_role_policy" "fallback_scheduler_invoke_lambda" {
+  name = "${var.project_name}-${var.environment}-fallback-scheduler-invoke"
+  role = aws_iam_role.fallback_scheduler.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = "lambda:InvokeFunction"
+        Resource = aws_lambda_function.fallback.arn
+      }
+    ]
+  })
+}
+
+resource "aws_scheduler_schedule" "fallback_check" {
+  name        = "${var.project_name}-${var.environment}-fallback-check"
+  description = "Checks whether sensor readings are stale and writes OpenWeather fallback data if needed."
+
+  schedule_expression = var.cloud_fallback_schedule_expression
+
+  flexible_time_window {
+    mode = "OFF"
+  }
+
+  target {
+    arn      = aws_lambda_function.fallback.arn
+    role_arn = aws_iam_role.fallback_scheduler.arn
+
+    input = jsonencode({
+      source = "eventbridge-scheduler"
+    })
+  }
+
+  depends_on = [
+    aws_iam_role_policy.fallback_scheduler_invoke_lambda
+  ]
+}
+
+data "aws_caller_identity" "current" {}
+
+resource "aws_iam_openid_connect_provider" "github" {
+  url = "https://token.actions.githubusercontent.com"
+
+  client_id_list = [
+    "sts.amazonaws.com"
+  ]
+
+  # Terraform requires this argument. AWS/GitHub OIDC no longer depends on
+  # a pinned thumbprint for this provider; the value is effectively legacy.
+  thumbprint_list = [
+    "6938fd4d98bab03faadb97b34396831e3780aea1"
+  ]
+
+  tags = local.common_tags
+}
+
+resource "aws_iam_role" "github_actions_grafana_deploy" {
+  name = "${var.project_name}-${var.environment}-github-actions-grafana-deploy"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = "sts:AssumeRoleWithWebIdentity"
+        Principal = {
+          Federated = aws_iam_openid_connect_provider.github.arn
+        }
+        Condition = {
+          StringEquals = {
+            "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
+          }
+          StringLike = {
+            "token.actions.githubusercontent.com:sub" = "repo:${var.github_repository}:ref:refs/heads/${var.github_branch}"
+          }
+        }
+      }
+    ]
+  })
+
+  tags = local.common_tags
+}
+
+resource "aws_iam_role_policy" "github_actions_grafana_ecr_push" {
+  name = "${var.project_name}-${var.environment}-github-actions-grafana-ecr-push"
+  role = aws_iam_role.github_actions_grafana_deploy.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "ecr:GetAuthorizationToken"
+        ]
+        Resource = "*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:BatchGetImage",
+          "ecr:CompleteLayerUpload",
+          "ecr:DescribeImages",
+          "ecr:DescribeRepositories",
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:InitiateLayerUpload",
+          "ecr:PutImage",
+          "ecr:UploadLayerPart"
+        ]
+        Resource = aws_ecr_repository.grafana.arn
+      }
+    ]
+  })
+}
