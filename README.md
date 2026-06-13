@@ -6,7 +6,7 @@ Portfolio-Projekt für eine kleine IoT-Wetterstation mit lokalem Entwicklungssta
 
 Ein ESP32-C6-Zero mit BME280-Sensor misst Temperatur, Luftfeuchtigkeit und Luftdruck und sendet die Messwerte per HTTP. Lokal nimmt ein FastAPI-Collector die Messwerte entgegen, speichert die Rohdaten in einem S3-kompatiblen Raw-Archiv über LocalStack und legt die validierten Messwerte zusätzlich in PostgreSQL ab. Grafana visualisiert die Messwerte aus PostgreSQL.
 
-Zusätzlich kann eine OpenWeather-basierte Fallback-Quelle genutzt werden, wenn längere Zeit keine aktuellen Sensordaten eintreffen. In AWS ist inzwischen ein schlanker Cloud-Ingestion-MVP vorhanden: API Gateway nimmt HTTP-Requests entgegen, eine Lambda validiert die Messwerte, prüft einen Header-Token und speichert valide Raw-Payloads in einem echten S3 Raw Bucket.
+Zusätzlich kann eine OpenWeather-basierte Fallback-Quelle genutzt werden, wenn längere Zeit keine aktuellen Sensordaten eintreffen. In AWS ist inzwischen ein schlanker Cloud-Ingestion-Pfad vorhanden: API Gateway nimmt HTTP-Requests entgegen, eine Lambda validiert die Messwerte, prüft einen Header-Token, speichert valide Raw-Payloads in einem echten S3 Raw Bucket und legt normalisierte Messwerte zusätzlich in Amazon RDS PostgreSQL ab.
 
 ## Aktueller Datenfluss
 
@@ -28,7 +28,7 @@ FastAPI Collector
                                    Grafana
 ```
 
-Erster Cloud-MVP:
+Aktueller Cloud-Pfad:
 
 ```text
 ESP32-C6-Zero + BME280 / curl
@@ -36,7 +36,18 @@ ESP32-C6-Zero + BME280 / curl
 API Gateway HTTP API
         ↓ Lambda Proxy Integration
 Lambda Collector
-        └── Raw JSON → Amazon S3 Raw Bucket
+        ├── Raw JSON → Amazon S3 Raw Bucket
+        └── normalisierte Messwerte → Amazon RDS PostgreSQL
+```
+
+Token-geschützter Leseendpunkt für Debugging und Smoke-Tests:
+
+```text
+GET /latest-readings
+        ↓
+Lambda Collector
+        ↓
+Amazon RDS PostgreSQL
 ```
 
 ## Aktuelle Ordnerstruktur
@@ -46,6 +57,7 @@ src/collector/
 ├── main.py            # FastAPI-Adapter für den lokalen HTTP-Collector
 ├── lambda_handler.py  # Lambda-Adapter für den AWS-Cloud-Ingestion-Pfad
 ├── raw_storage.py     # S3-Raw-Speicherung ohne PostgreSQL-Abhängigkeit
+├── rds_storage.py     # Cloud-RDS-Speicherung und Read-Zugriff für normalisierte Messwerte
 ├── ingestion.py       # lokale Ingestion: S3 Raw JSON + PostgreSQL
 ├── models.py          # Pydantic-Validierung der Messwerte
 ├── database.py        # PostgreSQL-Zugriff
@@ -67,7 +79,8 @@ scripts/fallback/
 
 scripts/cloud/
 ├── send-cloud-test-reading.sh    # sendet eine Testmessung an API Gateway/Lambda
-└── list-cloud-raw-objects.sh     # zeigt Raw-Objekte im echten AWS-S3-Bucket
+├── list-cloud-raw-objects.sh     # zeigt Raw-Objekte im echten AWS-S3-Bucket
+└── show-latest-readings.sh       # liest die letzten normalisierten Messwerte aus RDS über Lambda
 
 hardware/esp32-wetterstation/
 ├── esp32-wetterstation.ino       # ESP32-C6/BME280-Sketch mit lokalem und Cloud-Ziel
@@ -110,11 +123,13 @@ Bereits umgesetzt:
 * API Gateway und Lambda sind als Cloud-Ingestion-MVP deployed.
 * Der Cloud-Endpunkt ist über `X-Collector-Token` abgesichert.
 * Ein echter ESP32 kann Messwerte an API Gateway/Lambda senden, die im AWS-S3-Raw-Bucket landen.
+* Amazon RDS PostgreSQL ist in der AWS-Dev-Umgebung angebunden.
+* Die Cloud-Lambda läuft in einer VPC und schreibt valide Messwerte zusätzlich normalisiert nach RDS.
+* RDS ist nicht öffentlich erreichbar; PostgreSQL-Zugriff ist per Security Group auf die Lambda beschränkt.
+* Ein token-geschützter Read-Endpunkt `/latest-readings` kann die letzten normalisierten Messwerte aus RDS zurückgeben.
 
 Noch nicht umgesetzt:
 
-* Amazon RDS PostgreSQL für normalisierte Cloud-Messwerte
-* Lambda-Schreibpfad von Raw S3 zusätzlich nach RDS
 * Quarantine-Ablage für ungültige oder unerwartete Payloads
 * Cloud-Fallback über OpenWeather/EventBridge
 * Deployment von Grafana auf ECS/EC2
@@ -476,6 +491,7 @@ Die Tests prüfen unter anderem:
 * zentrale Konfiguration
 * S3-Key-Struktur
 * Lambda-Adapter ohne echten AWS-Aufruf
+* token-geschützte Lambda-Routen für Schreiben und Lesen
 
 Die Tests benötigen keine laufenden Docker-Container.
 
@@ -687,7 +703,7 @@ S3 und RDS enthalten Daten und sollten trotz Terraform-Verwaltung nicht unbedach
 
 ## Cloud-Ingestion MVP
 
-Der erste AWS-MVP nimmt Wetterdaten per HTTP entgegen und speichert die Raw-Payloads in S3.
+Der AWS-Cloud-Pfad nimmt Wetterdaten per HTTP entgegen, speichert die vollständige Raw-Payload in S3 und legt die validierten Messwerte zusätzlich normalisiert in RDS PostgreSQL ab.
 
 Datenfluss:
 
@@ -696,6 +712,7 @@ curl / ESP32-C6 + BME280
   → API Gateway HTTP API
   → Lambda Collector
   → S3 Raw Bucket
+  → RDS PostgreSQL
 ```
 
 Der Endpunkt ist mit einem einfachen Header-Token geschützt:
@@ -725,6 +742,7 @@ export COLLECTOR_TOKEN=<collector-token>
 
 ./scripts/cloud/send-cloud-test-reading.sh
 ./scripts/cloud/list-cloud-raw-objects.sh
+./scripts/cloud/show-latest-readings.sh
 ```
 
 Alternativ direkt prüfen:
@@ -736,16 +754,23 @@ aws s3 ls \
   --profile iot-dev
 ```
 
-Die aktuelle Cloud-Ingestion speichert bewusst nur Raw JSON in S3. Normalisierte Messwerte werden in der Cloud erst im nächsten Meilenstein zusätzlich nach Amazon RDS geschrieben.
+Zusätzlich kann geprüft werden, ob der token-geschützte Read-Endpunkt normalisierte RDS-Daten liefert:
+
+```bash
+API_URL="$(cd infra/dev && terraform output -raw collector_api_endpoint)"
+
+curl -sS -X GET "$API_URL/latest-readings" \
+  -H "X-Collector-Token: $COLLECTOR_TOKEN" | python3 -m json.tool
+```
 
 ## RDS-Milestone: normalisierte Cloud-Messwerte
 
-Der nächste geplante Ausbauschritt ist Amazon RDS PostgreSQL für normalisierte Messwerte.
+Amazon RDS PostgreSQL ist als Dev-Datenbank für normalisierte Cloud-Messwerte angebunden. Die Lambda schreibt nach erfolgreicher Validierung zuerst die vollständige Raw-Payload in S3 und danach eine normalisierte Zeile in die Tabelle `weather_readings`.
 
-Geplanter Datenfluss:
+Aktueller Datenfluss:
 
 ```text
-ESP32 / OpenWeather
+ESP32 / später OpenWeather
   → API Gateway / Lambda
   → S3 Raw Bucket
   → RDS PostgreSQL weather_readings
@@ -768,9 +793,17 @@ Ein zusätzlicher `processed` Bucket ist vorerst nicht geplant, weil die Messwer
 
 OpenWeather liefert ein größeres JSON als der Sensor. Das vollständige OpenWeather-JSON gehört in die Raw-Ablage. Für RDS werden daraus nur die normalisierten Felder `temperature_c`, `humidity_pct` und `pressure_hpa` plus Metadaten übernommen.
 
+### RDS-Zugriff und Security
+
+Die RDS-Instanz ist nicht öffentlich erreichbar. Der Zugriff auf PostgreSQL-Port `5432` wird über Security Groups auf die Lambda-Security-Group beschränkt. API Gateway hat keinen direkten Zugriff auf RDS; Requests laufen über die Lambda.
+
+Der aktuelle Header-Token schützt sowohl den Schreibpfad `/sensor-readings` als auch den Lese-/Smoke-Test-Pfad `/latest-readings`. Der Token ist ein projektspezifisches Shared Secret und kein AWS-Zugangsschlüssel.
+
+Für die Dev-Umgebung liegen Datenbankpasswort und Collector-Token aktuell über Terraform-Variablen bzw. Lambda-Environment-Variablen vor. Später können dafür AWS Secrets Manager oder SSM Parameter Store ergänzt werden. RDS Proxy ist ebenfalls mögliche Future Work, falls viele kurzlebige Lambda-Datenbankverbindungen relevant werden.
+
 ### Kosten- und Destroy-Hinweis für AWS-Dev
 
-Der aktuelle Cloud-MVP mit API Gateway, Lambda und S3 verursacht ohne Traffic nur sehr geringe bzw. nutzungsabhängige Kosten. RDS ist dagegen eine dauerhaft laufende Datenbankressource und sollte in der Dev-Umgebung nicht unnötig über Nacht laufen.
+API Gateway, Lambda und S3 verursachen bei diesem kleinen Dev-Setup überwiegend nutzungsabhängige bzw. sehr geringe Kosten. RDS ist dagegen eine dauerhaft laufende Datenbankressource und sollte in der Dev-Umgebung nicht unnötig laufen, wenn nicht aktiv daran gearbeitet wird.
 
 Vor längeren Pausen kann die Dev-Umgebung zerstört werden:
 
@@ -794,3 +827,5 @@ Mögliche spätere Erweiterungen:
 * IoT Rules
 * vollständig automatisiertes AWS-Deployment mit Terraform
 * Grafana-Deployment auf ECS/EC2
+* AWS Secrets Manager oder SSM Parameter Store für Secrets
+* RDS Proxy für robustere Lambda/RDS-Verbindungen
