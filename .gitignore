@@ -6,6 +6,7 @@ __pycache__/
 
 # Local config
 .env
+*.env
 
 # OS / editor
 .DS_Store
@@ -16,6 +17,9 @@ __pycache__/
 .localstack/
 postgres-data/
 grafana-data/
+
+# Backups
+backups/
 
 # Build artifacts
 build/
@@ -38,3 +42,4 @@ events/lambda-sensor-reading.json
 
 # ESP32 local secrets
 hardware/esp32-wetterstation/secrets.h
+secrets.h
