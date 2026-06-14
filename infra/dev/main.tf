@@ -525,8 +525,8 @@ resource "aws_lambda_function" "collector" {
 
   environment {
     variables = {
-      RAW_BUCKET      = aws_s3_bucket.raw_weather_data.bucket
-      COLLECTOR_TOKEN = var.collector_token
+      RAW_BUCKET                     = aws_s3_bucket.raw_weather_data.bucket
+      COLLECTOR_TOKEN_PARAMETER_NAME = var.collector_token_parameter_name
 
       POSTGRES_HOST     = aws_db_instance.postgres.address
       POSTGRES_PORT     = "5432"
@@ -539,7 +539,8 @@ resource "aws_lambda_function" "collector" {
   depends_on = [
     aws_iam_role_policy_attachment.collector_lambda_basic_execution,
     aws_iam_role_policy_attachment.collector_lambda_vpc_access,
-    aws_iam_role_policy.collector_lambda_s3_write
+    aws_iam_role_policy.collector_lambda_s3_write,
+    aws_iam_role_policy.collector_lambda_ssm_read
   ]
 
   tags = local.common_tags
@@ -667,18 +668,19 @@ resource "aws_lambda_function" "fallback" {
 
   environment {
     variables = {
-      COLLECTOR_API_ENDPOINT     = aws_apigatewayv2_api.collector.api_endpoint
-      COLLECTOR_TOKEN            = var.collector_token
-      FALLBACK_THRESHOLD_SECONDS = tostring(var.cloud_fallback_threshold_seconds)
-      OPENWEATHER_API_KEY        = var.openweather_api_key
-      OPENWEATHER_LAT            = var.openweather_lat
-      OPENWEATHER_LON            = var.openweather_lon
-      OPENWEATHER_LOCATION       = var.openweather_location
+      COLLECTOR_API_ENDPOINT             = aws_apigatewayv2_api.collector.api_endpoint
+      FALLBACK_THRESHOLD_SECONDS         = tostring(var.cloud_fallback_threshold_seconds)
+      OPENWEATHER_LOCATION               = var.openweather_location
+      COLLECTOR_TOKEN_PARAMETER_NAME     = var.collector_token_parameter_name
+      OPENWEATHER_API_KEY_PARAMETER_NAME = var.openweather_api_key_parameter_name
+      OPENWEATHER_LAT_PARAMETER_NAME     = var.openweather_lat_parameter_name
+      OPENWEATHER_LON_PARAMETER_NAME     = var.openweather_lon_parameter_name
     }
   }
 
   depends_on = [
-    aws_iam_role_policy_attachment.fallback_lambda_basic_execution
+    aws_iam_role_policy_attachment.fallback_lambda_basic_execution,
+    aws_iam_role_policy.fallback_lambda_ssm_read
   ]
 
   tags = local.common_tags
@@ -744,3 +746,92 @@ resource "aws_scheduler_schedule" "fallback_check" {
 }
 
 data "aws_caller_identity" "current" {}
+
+locals {
+  collector_token_parameter_arn     = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter${var.collector_token_parameter_name}"
+  openweather_api_key_parameter_arn = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter${var.openweather_api_key_parameter_name}"
+  openweather_lat_parameter_arn     = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter${var.openweather_lat_parameter_name}"
+  openweather_lon_parameter_arn     = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter${var.openweather_lon_parameter_name}"
+}
+
+resource "aws_iam_role_policy" "collector_lambda_ssm_read" {
+  name = "${var.project_name}-${var.environment}-collector-ssm-read"
+  role = aws_iam_role.collector_lambda.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "ssm:GetParameter"
+        ]
+        Resource = [
+          local.collector_token_parameter_arn
+        ]
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy" "fallback_lambda_ssm_read" {
+  name = "${var.project_name}-${var.environment}-fallback-ssm-read"
+  role = aws_iam_role.fallback_lambda.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "ssm:GetParameter"
+        ]
+        Resource = [
+          local.collector_token_parameter_arn,
+          local.openweather_api_key_parameter_arn,
+          local.openweather_lat_parameter_arn,
+          local.openweather_lon_parameter_arn
+        ]
+      }
+    ]
+  })
+}
+
+resource "aws_security_group" "vpc_endpoint" {
+  name        = "${var.project_name}-${var.environment}-vpc-endpoint-sg"
+  description = "Allow HTTPS from Lambda to VPC interface endpoints."
+  vpc_id      = aws_vpc.dev.id
+
+  ingress {
+    description     = "HTTPS from Lambda"
+    from_port       = 443
+    to_port         = 443
+    protocol        = "tcp"
+    security_groups = [aws_security_group.lambda.id]
+  }
+
+  egress {
+    description = "All outbound"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = merge(local.common_tags, {
+    Name = "${var.project_name}-${var.environment}-vpc-endpoint-sg"
+  })
+}
+
+resource "aws_vpc_endpoint" "ssm" {
+  vpc_id              = aws_vpc.dev.id
+  service_name        = "com.amazonaws.${var.aws_region}.ssm"
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = [aws_subnet.private_a.id, aws_subnet.private_b.id]
+  security_group_ids  = [aws_security_group.vpc_endpoint.id]
+  private_dns_enabled = true
+
+  tags = merge(local.common_tags, {
+    Name = "${var.project_name}-${var.environment}-ssm-endpoint"
+  })
+}

@@ -132,3 +132,27 @@ variable "fallback_reserved_concurrency" {
   type        = number
   default     = 1
 }
+
+variable "collector_token_parameter_name" {
+  description = "SSM SecureString parameter name for the collector token."
+  type        = string
+  default     = "/iot-wetterdaten-pipeline/dev/collector-token"
+}
+
+variable "openweather_api_key_parameter_name" {
+  description = "SSM SecureString parameter name for the OpenWeather API key."
+  type        = string
+  default     = "/iot-wetterdaten-pipeline/dev/openweather-api-key"
+}
+
+variable "openweather_lat_parameter_name" {
+  description = "SSM String parameter name for the OpenWeather latitude."
+  type        = string
+  default     = "/iot-wetterdaten-pipeline/dev/openweather-lat"
+}
+
+variable "openweather_lon_parameter_name" {
+  description = "SSM String parameter name for the OpenWeather longitude."
+  type        = string
+  default     = "/iot-wetterdaten-pipeline/dev/openweather-lon"
+}
