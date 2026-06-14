@@ -4,6 +4,11 @@ from datetime import datetime, timezone
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+from src.collector.parameter_store import (
+    get_required_secret_from_parameter_env,
+    get_required_string_from_parameter_env,
+)
+
 
 TOKEN_HEADER_NAME = "X-Collector-Token"
 
@@ -70,9 +75,20 @@ def should_use_fallback(latest_sensor_reading: dict | None, threshold_seconds: i
 
 
 def fetch_openweather() -> dict:
-    api_key = required_env("OPENWEATHER_API_KEY")
-    lat = required_env("OPENWEATHER_LAT")
-    lon = required_env("OPENWEATHER_LON")
+    if os.getenv("OPENWEATHER_API_KEY_PARAMETER_NAME"):
+        api_key = get_required_secret_from_parameter_env("OPENWEATHER_API_KEY_PARAMETER_NAME")
+    else:
+        api_key = required_env("OPENWEATHER_API_KEY")
+
+    if os.getenv("OPENWEATHER_LAT_PARAMETER_NAME"):
+        lat = get_required_string_from_parameter_env("OPENWEATHER_LAT_PARAMETER_NAME")
+    else:
+        lat = required_env("OPENWEATHER_LAT")
+
+    if os.getenv("OPENWEATHER_LON_PARAMETER_NAME"):
+        lon = get_required_string_from_parameter_env("OPENWEATHER_LON_PARAMETER_NAME")
+    else:
+        lon = required_env("OPENWEATHER_LON")
 
     query = urlencode(
         {
@@ -102,7 +118,10 @@ def build_fallback_payload(openweather_response: dict) -> dict:
 def lambda_handler(event, context):
     try:
         collector_api_endpoint = required_env("COLLECTOR_API_ENDPOINT").rstrip("/")
-        collector_token = required_env("COLLECTOR_TOKEN")
+        if os.getenv("COLLECTOR_TOKEN_PARAMETER_NAME"):
+            collector_token = get_required_secret_from_parameter_env("COLLECTOR_TOKEN_PARAMETER_NAME")
+        else:
+            collector_token = required_env("COLLECTOR_TOKEN")
         threshold_seconds = int(os.getenv("FALLBACK_THRESHOLD_SECONDS", "600"))
 
         latest_sensor_reading = get_latest_sensor_reading(

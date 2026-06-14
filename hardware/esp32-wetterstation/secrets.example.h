@@ -7,7 +7,7 @@
 #define WIFI_PASSWORD "your-wifi-password"
 
 #define LOCAL_COLLECTOR_URL "http://YOUR_LOCAL_IP:8088/sensor-readings"
-#define CLOUD_COLLECTOR_URL "https://my-domain.click/sensor-readings"
+#define CLOUD_COLLECTOR_URL "https://sensor-domain-jakob.click/sensor-readings"
 
 #define CLOUD_COLLECTOR_TOKEN "your-cloud-token"
 

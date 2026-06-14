@@ -4,6 +4,7 @@ import os
 
 from pydantic import ValidationError
 
+from src.collector.parameter_store import get_required_secret_from_parameter_env
 from src.collector.exceptions import CollectorStorageError
 from src.collector.models import FallbackWeatherReading, SensorReading
 from src.collector.raw_storage import store_raw_reading
@@ -91,15 +92,25 @@ def get_header(event: dict, header_name: str) -> str | None:
     return None
 
 
-def is_authorized(event: dict) -> bool:
-    expected_token = os.getenv("COLLECTOR_TOKEN")
+def get_expected_collector_token() -> str | None:
+    parameter_name = os.getenv("COLLECTOR_TOKEN_PARAMETER_NAME")
+    if parameter_name:
+        return get_required_secret_from_parameter_env("COLLECTOR_TOKEN_PARAMETER_NAME")
 
-    if not expected_token:
+    return os.getenv("COLLECTOR_TOKEN")
+
+
+def is_authorized(event: dict) -> bool:
+    try:
+        expected_token = get_expected_collector_token()
+    except Exception:
+        return False
+
+    if expected_token is None or expected_token.strip() == "":
         return False
 
     provided_token = get_header(event, TOKEN_HEADER_NAME)
-
-    if not provided_token:
+    if provided_token is None:
         return False
 
     return hmac.compare_digest(provided_token, expected_token)
