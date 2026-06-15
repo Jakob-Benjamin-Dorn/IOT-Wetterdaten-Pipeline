@@ -7,6 +7,10 @@ API_URL="${COLLECTOR_API_URL:-}"
 COLLECTOR_TOKEN="${COLLECTOR_TOKEN:-}"
 
 if [ -z "$API_URL" ]; then
+  API_URL="$(cd "$PROJECT_ROOT/infra/dev" && terraform output -raw stable_sensor_api_url 2>/dev/null || true)"
+fi
+
+if [ -z "$API_URL" ] || [ "$API_URL" = "null" ]; then
   API_URL="$(cd "$PROJECT_ROOT/infra/dev" && terraform output -raw collector_api_endpoint)"
 fi
 

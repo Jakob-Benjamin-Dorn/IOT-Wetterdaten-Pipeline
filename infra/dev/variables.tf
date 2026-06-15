@@ -21,12 +21,6 @@ variable "raw_bucket_name" {
   type        = string
 }
 
-variable "collector_token" {
-  description = "Shared token required by the collector Lambda."
-  type        = string
-  sensitive   = true
-}
-
 variable "db_name" {
   description = "PostgreSQL database name."
   type        = string
@@ -49,22 +43,6 @@ variable "grafana_admin_password" {
   description = "Admin password for the dev Grafana instance."
   type        = string
   sensitive   = true
-}
-
-variable "openweather_api_key" {
-  description = "OpenWeather API key for the cloud fallback Lambda."
-  type        = string
-  sensitive   = true
-}
-
-variable "openweather_lat" {
-  description = "Latitude for OpenWeather fallback."
-  type        = string
-}
-
-variable "openweather_lon" {
-  description = "Longitude for OpenWeather fallback."
-  type        = string
 }
 
 variable "openweather_location" {

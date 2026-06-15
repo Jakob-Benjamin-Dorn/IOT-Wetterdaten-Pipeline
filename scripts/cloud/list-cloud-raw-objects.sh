@@ -17,11 +17,11 @@ if [ -z "$BUCKET_NAME" ]; then
 fi
 
 echo "AWS identity:"
-aws sts get-caller-identity
+aws sts get-caller-identity --profile "$AWS_PROFILE"
 echo
 
 echo "Bucket:"
 echo "$BUCKET_NAME"
 echo
 
-aws s3 ls "s3://$BUCKET_NAME/raw_readings/" --recursive | tail -20
+aws s3 ls "s3://$BUCKET_NAME/raw_readings/" --recursive --profile "$AWS_PROFILE" | tail -20

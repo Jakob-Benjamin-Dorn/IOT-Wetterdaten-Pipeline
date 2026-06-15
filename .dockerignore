@@ -8,3 +8,10 @@ postgres-data
 grafana-data
 .localstack
 *.pyc
+build
+.terraform
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfvars.json
+hardware/esp32-wetterstation/secrets.h

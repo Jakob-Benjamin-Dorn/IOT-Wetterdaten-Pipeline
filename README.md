@@ -2,69 +2,76 @@
 
 [![CI](https://github.com/Jakob-Benjamin-Dorn/IOT-Wetterdaten-Pipeline/actions/workflows/tests.yml/badge.svg)](https://github.com/Jakob-Benjamin-Dorn/IOT-Wetterdaten-Pipeline/actions/workflows/tests.yml)
 
-Portfolio-Projekt für eine kleine IoT-Wetterstation mit lokalem Entwicklungsstack und AWS-Cloud-Ingestion.
+Dieses Projekt entstand aus der Frage, wie man eine echte, ausfallsichere IoT-Datenpipeline bauen kann, die sowohl lokal simulier- und testbar ist, als auch produktionsnah und ressourcen-effizient in der AWS-Cloud implementiert werden kann.
 
-Ein ESP32-C6-Zero-Microcontroller mit angeschlossenem BME280-Sensor misst Temperatur, Luftfeuchtigkeit und Luftdruck und versendet über ein WLAN-Modul die Messwerte per HTTP. Im lokalen Setup nimmt ein FastAPI-Collector die Messwerte entgegen, speichert die Raw JSON S3-kompatibel in LocalStack und schreibt validierte Messwerte zusätzlich in PostgreSQL. Grafana visualisiert die Messwerte aus PostgreSQL.
+Hierfür misst ein ESP32-C6-Zero-Microcontroller mit angeschlossenem BME280-Sensor Temperatur, Luftfeuchtigkeit und Luftdruck und versendet über WLAN die Messwerte per HTTP. Im lokalen Setup nimmt ein FastAPI-Collector die Messwerte entgegen, speichert die Raw JSON S3-kompatibel in LocalStack und schreibt validierte Messwerte zusätzlich in PostgreSQL. Grafana visualisiert die Messwerte aus PostgreSQL.
 
-Im Cloud-Setup mit AWS ist derselbe fachliche Datenfluss als schlanke Serverless-/Dev-Architektur umgesetzt: der ESP32 sendet an eine stabile HTTPS-Domain, API-Gateway leitet an eine Lambda weiter, die Lambda validiert die Payload, prüft einen Header-Token, speichert den vollständige Raw-Payload in Amazon S3 und schreibt normalisierte Werte nach Amazon RDS PostgreSQL. Eine zweite Lambda wird per EventBridge Scheduler regelmäßig ausgeführt und schreibt bei veralteten Sensordaten OpenWeather-Fallback-Werte über denselben Collector-Pfad. Grafana läuft als eigenes Docker-Image aus Amazon ECR auf einer EC2-Instanz und wird per SSM-Port-Forwarding geöffnet. Das Grafana-Image wird per GitHub Actions über OIDC nach ECR gepusht und die EC2 anschließend per SSM neu gestartet.
+Im Cloud-Setup mit AWS ist derselbe fachliche Datenfluss als schlanke Serverless-/Dev-Architektur umgesetzt: der ESP32 sendet an eine stabile HTTPS-Domain, API-Gateway leitet an eine Lambda weiter, die Lambda validiert die Payload, prüft einen Header-Token, speichert den vollständige Raw-Payload in Amazon S3 und schreibt normalisierte Werte nach Amazon RDS PostgreSQL. Eine zweite Lambda wird per EventBridge Scheduler regelmäßig ausgeführt und schreibt bei veralteten Sensordaten OpenWeather-Fallback-Werte über denselben Collector-Pfad. Grafana läuft als eigenes Docker-Image aus Amazon Elastic Container Registry (ECR) auf einer EC2-Instanz und wird per SSM-Port-Forwarding geöffnet. Das Grafana-Image wird per GitHub Actions über OIDC nach ECR gepusht und die EC2 anschließend per SSM neu gestartet.
 
-## Highlights
+Mir war dabei wichtig, nicht einfach möglichst viele Services zu verwenden, sondern bewusste Engineering-Entscheidungen zu treffen: einen nachvollziehbarer HTTP-Pfad statt sofort z.B. MQTT, Terraform statt "Klick"-Infrastruktur, OIDC statt langfristiger AWS Keys, SSM Parameter Store für die wichtigsten Runtime-Secrets und Kostenkontrolle statt unnötiger Dauerläufer.
 
-* eigener ESP32-C6-Zero mit BME280 als Datenquelle
+![Grafana Dashboard mit Live-Wetterdaten](docs/images/grafana-dashboard.png)
+*Grafana-Dashboard mit Live-Daten des ESP32.*
+
+## Highlights & Kurzüberblick
+
+* echter ESP32-C6-Zero mit BME280 als Datenquelle
 * lokaler Entwicklungsstack mit FastAPI, PostgreSQL, LocalStack S3 und Grafana
 * AWS-Cloud-Ingestion über API Gateway, Lambda, S3 und RDS PostgreSQL
-* stabile Sensor-Domain für den ESP32 statt wechselnder API-Gateway-URL
+* stabile Sensor-Domain statt wechselnder API-Gateway-URL
 * OpenWeather-Fallback bei fehlenden oder veralteten Sensordaten
-* Grafana-Dashboard lokal und in AWS
-* eigenes Grafana-Docker-Image mit Dashboard-Provisioning
-* GitHub Actions CI für Tests
-* GitHub Actions Deployment für Grafana-Image per AWS OIDC, ECR und SSM
+* Grafana lokal und in AWS, Cloud-Zugriff bewusst nur per SSM-Port-Forwarding
+* eigenes Grafana-Docker-Image in Amazon ECR
+* GitHub Actions CI sowie Grafana-Deployment per OIDC, ECR und SSM
 * Terraform mit getrenntem Bootstrap- und Dev-Stack
 * Remote Terraform State in S3 mit Locking
 * AWS Budget Alert, API Gateway Throttling und Lambda Reserved Concurrency als Dev-Kosten- und Missbrauchsschutz
-* Collector-Token und OpenWeather-Konfiguration über SSM Parameter Store statt Klarwerten in Lambda-Environment-Variablen
+* Collector-Token und OpenWeather-Konfiguration über SSM Parameter Store
+
+## Was ich damit zeigen wollte
+
+Dieses Projekt ist bewusst als kleines, aber vollständiges End-to-End-System gebaut. Es zeigt nicht nur einzelne Tools, sondern die Übergänge zwischen Hardware, lokaler Entwicklung, Cloud-Ingestion, Infrastruktur, Security und Visualisierung.
+
+Besonders wichtig waren mir:
+
+* **Reproduzierbarkeit:** Lokaler Stack per Docker Compose, Cloud-Infrastruktur per Terraform.
+* **Kostenbewusstsein:** Keine unnötigen NAT Gateways oder dauerhaft öffentlichen Demo-Services.
+* **Sicherheit im Dev-Kontext:** RDS privat, Grafana nicht öffentlich, GitHub Actions über OIDC, Secrets nicht im Repository.
+* **Portfolio-Tauglichkeit:** Der Datenfluss ist mit echten Live-Daten demonstrierbar, aber trotzdem so dokumentiert, dass andere das Projekt mit eigenen Daten nachbauen können.
 
 ## Architektur
 
 ### Lokaler Datenfluss
 
-```text
-ESP32-C6-Zero + BME280
-        ↓ HTTP POST
-FastAPI Collector
-        ├── Raw JSON → LocalStack S3
-        └── validierte Messwerte → PostgreSQL
-                                      ↓
-                                   Grafana
+```mermaid
+graph TD
+    ESP[ESP32-C6-Zero + BME280] -->|HTTP POST| FastAPI[FastAPI Collector]
+    FastAPI -->|Raw JSON| S3[(LocalStack S3)]
+    FastAPI -->|Validierte Daten| PG[(PostgreSQL)]
+    PG --> Grafana[Grafana Dashboard]
 ```
 
 Lokaler OpenWeather-Fallback:
 
-```text
-OpenWeather API
-        ↓ Fallback-Skript
-FastAPI Collector
-        ├── Raw JSON → LocalStack S3
-        └── validierte Messwerte → PostgreSQL
-                                      ↓
-                                   Grafana
+```mermaid
+graph TD
+    OW[OpenWeather API] -->|Fallback-Skript| FastAPI[FastAPI Collector]
+    FastAPI -->|Raw JSON| LocalS3[(LocalStack S3)]
+    FastAPI -->|validierte Messwerte| PG[(PostgreSQL)]
+    PG --> Grafana[Grafana Dashboard]
 ```
 
 ### AWS-Datenfluss
 
-```text
-ESP32-C6-Zero + BME280
-        ↓ HTTPS POST mit X-Collector-Token
-https://sensor-domain-jakob.click/sensor-readings
-        ↓
-API Gateway HTTP API
-        ↓ Lambda Proxy Integration
-Lambda Collector
-        ├── Raw JSON → Amazon S3 Raw Bucket
-        └── normalisierte Messwerte → Amazon RDS PostgreSQL
-                                             ↓
-                                      Grafana auf EC2
-                                      Zugriff per SSM-Port-Forwarding
+```mermaid
+graph TD
+    ESP[ESP32-C6-Zero + BME280] -->|HTTPS POST + X-Collector-Token| Domain[Stabile Sensor-Domain]
+    Domain --> APIGW[API Gateway HTTP API]
+    APIGW --> Collector[Lambda Collector]
+    Collector -->|Raw JSON| S3[(Amazon S3 Raw Bucket)]
+    Collector -->|normalisierte Messwerte| RDS[(Amazon RDS PostgreSQL)]
+    RDS --> Grafana[Grafana auf EC2]
+    SSM[SSM Port Forwarding] -. Zugriff .-> Grafana
 ```
 
 Token-geschützter Leseendpunkt für Smoke-Tests und Debugging:
@@ -79,15 +86,57 @@ Amazon RDS PostgreSQL
 
 Cloud-Fallback:
 
-```text
-EventBridge Scheduler
-        ↓
-Fallback-Lambda
-        ├── prüft letzten Sensorwert über GET /latest-readings?source=sensor&limit=1
-        └── schreibt bei Bedarf OpenWeather-Werte über POST /fallback-readings
+```mermaid
+graph TD
+    Scheduler[EventBridge Scheduler] --> Fallback[Fallback-Lambda ohne VPC]
+    Fallback -->|GET /latest-readings?source=sensor&limit=1| APIGW[API Gateway]
+    Fallback -->|bei veralteten Sensordaten| OW[OpenWeather API]
+    Fallback -->|POST /fallback-readings| APIGW
+    APIGW --> Collector[Lambda Collector in VPC]
+    Collector --> S3[(Amazon S3)]
+    Collector --> RDS[(Amazon RDS PostgreSQL)]
 ```
 
 Die Fallback-Lambda läuft bewusst ohne VPC-Anbindung, damit sie OpenWeather direkt über das Internet abrufen kann, ohne einen NAT Gateway zu benötigen. Die Collector-Lambda läuft in privaten Subnets, damit sie RDS erreichen kann. Für den Zugriff auf SSM Parameter Store nutzt die Collector-Lambda einen VPC Interface Endpoint.
+
+## Architekturentscheidungen
+
+### HTTP statt direkt AWS IoT Core/MQTT
+
+AWS IoT Core und MQTT wären naheliegend für ein IoT-Projekt. Ich habe mich für diesen Stand trotzdem bewusst für HTTP entschieden, weil der Datenfluss dadurch einfacher zu debuggen und für ein Portfolio leichter nachvollziehbar ist. Der ESP32 sendet eine klare JSON-Payload, API Gateway schützt den Eingang, und die Lambda übernimmt Validierung und Speicherung. MQTT und Device-Zertifikate bleiben als spätere Ausbaustufe vorgesehen.
+
+### Raw-Daten in S3, normalisierte Daten in RDS
+
+S3 dient als vollständiges Raw-Archiv. RDS PostgreSQL enthält nur die validierten und normalisierten Messwerte, die für Abfragen und Grafana relevant sind. Dadurch bleibt der ursprüngliche Payload nachvollziehbar, während das Dashboard nicht auf unstrukturierte JSON-Dateien angewiesen ist.
+
+### Fallback-Lambda ohne VPC
+
+Die Fallback-Lambda ruft OpenWeather auf und läuft bewusst außerhalb der VPC. So braucht sie keinen NAT Gateway. Die eigentliche Speicherung passiert anschließend wieder über den bestehenden Collector-Pfad. RDS bleibt damit privat, während der externe API-Aufruf kostengünstig und einfach bleibt.
+
+### Grafana nicht öffentlich
+
+Cloud-Grafana läuft zwar in AWS, ist aber nicht öffentlich erreichbar. Der Zugriff erfolgt per SSM-Port-Forwarding. Für einen späteren öffentlichen Demo-Zugang wäre ein separates Read-only-Setup unter eigener Subdomain sinnvoll.
+
+## Hürden beim Bau
+
+Einige Teile des Projekts wirkten in der Theorie einfacher, als sie es in der Umsetzung waren. Gerade diese Stellen waren aber hilfreich für den Lerneffekt und machen den Unterschied zwischen moderiertem Tutorial-Nachbau und der Implementierung eines echten End-to-End-Setups.
+
+* Der ESP32 hat nach längerer Laufzeit nicht immer zuverlässig weitergesendet. Deshalb enthält der Sketch inzwischen mehr Logging, längere HTTP-Timeouts, deaktiviertes WiFi-Sleeping und eine einfache Recovery-Logik, die den Controller nach mehreren fehlgeschlagenen Sendeversuchen neu startet.
+
+* Solange der ESP32 direkt an eine `execute-api`-URL sendet, muss die Firmware bei einem Neuaufbau der API angepasst werden und ist daher unpraktisch. Deshalb hängt vor dem Cloud-Collector inzwischen eine stabile Route-53-/ACM-Domain.
+
+* RDS in privaten Subnets und externe APIs passen nicht automatisch zusammen. Die Collector-Lambda läuft in der VPC, damit sie RDS erreicht. Die OpenWeather-Fallback-Lambda läuft dagegen bewusst außerhalb der VPC, damit sie ohne NAT Gateway die externe OpenWeather-API abrufen kann und anschließend über den bestehenden Collector-Pfad zurückschreibt.
+
+* Nach dem Umzug von Tokens und OpenWeather-Konfiguration in SSM Parameter Store reichte es nicht, nur IAM-Rechte zu vergeben: die Collector-Lambda läuft in privaten Subnets und braucht deshalb auch einen VPC Interface Endpoint für SSM.
+
+* Anfangs lagen langlebige Ressourcen und zerstörbare Dev-Ressourcen näher beieinander. Später habe ich Bootstrap und Dev getrennt, damit Remote State, ECR, GitHub OIDC, Budget und Domain nicht versehentlich mit der Demo-Umgebung zerstört werden.
+
+* Ein öffentliches Grafana wäre für Demos bequem gewesen, hätte aber zusätzliche Auth-/Read-only- und Netzwerksicherheitsfragen aufgemacht. Für den aktuellen Stand bleibt Grafana deshalb über SSM-Port-Forwarding erreichbar; ein öffentlicher Read-only-Zugang ist Future Work.
+
+* Der OpenWeather-Fallback sollte lokal und in AWS nicht zwei völlig getrennte Datenmodelle erzeugen. Deshalb werden Sensor- und Fallback-Werte beide über `source` unterschieden und in dieselbe RDS-Tabelle geschrieben, während die vollständigen Raw-Payloads in S3 erhalten bleiben.
+
+* Terraform soll die Secret-Werte nicht selbst in Parameter Store schreiben, weil sie sonst wieder im State landen können. Deshalb verwaltet Terraform nur Parameternamen, IAM-Rechte und Lambda-Environment-Variablen mit Parameternamen; die eigentlichen Werte werden separat gesetzt.
+
 
 ## Repository-Struktur
 
@@ -190,8 +239,6 @@ Noch nicht umgesetzt:
 * Rebuild-Skript, das normalisierte RDS-Daten aus S3 Raw-Daten wiederherstellt
 * AWS IoT Core / MQTT
 
-AWS IoT Core und MQTT sind bewusst nur als mögliche Future Work vorgesehen. Der aktuelle Stand bleibt absichtlich HTTP-basiert, damit der Datenfluss leicht nachvollziehbar bleibt.
-
 ## Hardware
 
 Board:
@@ -214,7 +261,7 @@ Luftfeuchtigkeit
 Luftdruck
 ```
 
-Verbindung:
+Verbindung / Protokoll:
 
 ```text
 I²C
@@ -223,10 +270,10 @@ I²C
 Aktuell funktionierende Pins:
 
 ```text
-SDA → GPIO 4
-SCL → GPIO 5
-VCC → 3V3
-GND → GND
+SDA → GPIO 4 (Messwerte)
+SCL → GPIO 5 (Takt)
+VCC → 3V3 (Stromversorgung)
+GND → GND (Masse/Rückleiter)
 ```
 
 Der Sensor sendet für die Demo typischerweise ungefähr alle 60 Sekunden. Das Intervall wird im ESP32-Sketch über `SEND_INTERVAL_MS` gesteuert.
@@ -254,9 +301,9 @@ pressure_hpa: 800 bis 1200
 
 Ungültige Werte werden abgelehnt und nicht in PostgreSQL gespeichert.
 
-# Lokale Entwicklung
+## Lokale Entwicklung
 
-## Voraussetzungen
+### Voraussetzungen
 
 Benötigt:
 
@@ -269,7 +316,7 @@ Benötigt:
 
 LocalStack wird über Docker Compose gestartet. Eine separat installierte LocalStack-CLI ist für den normalen lokalen Start nicht nötig.
 
-## Python-Abhängigkeiten installieren
+### Python-Abhängigkeiten installieren
 
 Optional mit virtueller Umgebung:
 
@@ -287,7 +334,7 @@ python3 -m pip install --user -r requirements.txt
 
 Die `.venv` ist nur eine lokale Python-Umgebung und gehört nicht ins Git-Repository.
 
-## Umgebungsvariablen lokal
+### Umgebungsvariablen lokal
 
 Aus Vorlage erstellen:
 
@@ -332,7 +379,7 @@ Die Datei `.env` wird nicht committed. Die LocalStack-Zugangsdaten `test/test` s
 
 Wichtig: Terraform liest `.env` nicht automatisch. Für Terraform werden Variablen über `terraform.tfvars`, `*.auto.tfvars`, `-var=...` oder Umgebungsvariablen mit dem Prefix `TF_VAR_` gesetzt.
 
-## Lokalen Stack starten
+### Lokalen Stack starten
 
 ```bash
 docker compose up -d postgres localstack grafana collector
@@ -369,7 +416,7 @@ Erwartete Antwort:
 {"status":"ok"}
 ```
 
-## Lokalen Stack testen
+### Lokalen Stack testen
 
 ```bash
 set -a
@@ -386,7 +433,7 @@ Der Smoke-Test prüft:
 3. Sichtbarkeit der Messung in PostgreSQL
 4. Sichtbarkeit eines Raw-Objekts in LocalStack S3
 
-## Optional: Collector manuell starten
+### Optional: Collector manuell starten
 
 Für Debugging kann der Collector auch weiterhin manuell mit Uvicorn gestartet werden. Dann darf aber kein Collector-Container auf Port `8088` laufen.
 
@@ -401,7 +448,7 @@ set +a
 uvicorn src.collector.main:app --host 0.0.0.0 --port 8088 --reload
 ```
 
-## Lokale Testdaten senden
+### Lokale Testdaten senden
 
 ```bash
 ./scripts/dev/send-test-reading.sh
@@ -420,7 +467,7 @@ curl -X POST http://localhost:8088/readings \
   }'
 ```
 
-## PostgreSQL prüfen
+### PostgreSQL prüfen
 
 ```bash
 ./scripts/dev/show-latest-readings.sh
@@ -436,7 +483,7 @@ docker exec -it wetter-postgres psql -U weather -d weather -c \
  LIMIT 10;"
 ```
 
-## LocalStack S3 prüfen
+### LocalStack S3 prüfen
 
 ```bash
 set -a
@@ -463,7 +510,7 @@ raw_readings/source=sensor/device_id=esp32-c6-window-01/year=2026/month=06/day=1
 raw_readings/source=openweather/device_id=openweather-reference/year=2026/month=06/day=12/hour=10/...
 ```
 
-## OpenWeather-Fallback lokal
+### OpenWeather-Fallback lokal
 
 Einen einzelnen OpenWeather-Wert abrufen und an den Collector senden:
 
@@ -489,7 +536,7 @@ Fallback-Prüfung regelmäßig ausführen:
 
 OpenWeather-Werte werden mit `source = openweather` gespeichert. Sensorwerte werden mit `source = sensor` gespeichert.
 
-## Tests
+### Tests
 
 ```bash
 pytest
@@ -507,7 +554,7 @@ Die Tests prüfen unter anderem:
 
 Die Tests benötigen keine laufenden Docker-Container.
 
-## Grafana lokal öffnen
+### Grafana lokal öffnen
 
 ```text
 http://localhost:3000
@@ -543,7 +590,7 @@ WHERE source = 'sensor'
 ORDER BY received_at;
 ```
 
-# ESP32
+## ESP32
 
 Der Sketch liegt unter:
 
@@ -585,9 +632,9 @@ X-Collector-Token: <token>
 
 Der Token steht lokal in `secrets.h` als `CLOUD_COLLECTOR_TOKEN`. Er ist kein AWS-Zugangsschlüssel und darf nicht ins Git-Repository.
 
-# AWS Deployment
+## AWS Deployment
 
-## Deployment-Überblick
+### Deployment-Überblick
 
 Die AWS-Infrastruktur ist bewusst in zwei Terraform-Stacks getrennt:
 
@@ -604,7 +651,7 @@ infra/dev
 
 Diese Trennung ist wichtig, weil die Sensor-Domain, das ECR Repository, das GitHub-OIDC-Setup und der Terraform-State unabhängig von der temporären Dev-Umgebung bleiben sollen.
 
-## AWS-Profil setzen
+### AWS-Profil setzen
 
 Für echte AWS-Befehle nicht die lokale `.env` mit LocalStack-Dummy-Credentials sourcen. Stattdessen:
 
@@ -623,7 +670,7 @@ Falls nötig vorher SSO Credentials in AWS IAM Identity Center konfigurieren, an
 aws sso login --profile iot-dev
 ```
 
-## Bootstrap-Infrastruktur
+### Bootstrap-Infrastruktur
 
 Bootstrap enthält:
 
@@ -661,7 +708,7 @@ Der ESP32 nutzt als stabile Zieladresse:
 https://sensor-domain-jakob.click/sensor-readings
 ```
 
-## Dev-Infrastruktur
+### Dev-Infrastruktur
 
 Dev enthält:
 
@@ -728,7 +775,7 @@ aws ssm put-parameter \
   --profile iot-dev
 ```
 
-Deploy der Dev-Infrastruktur:
+Deployment der Dev-Infrastruktur:
 
 ```bash
 cd infra/dev
@@ -751,7 +798,7 @@ terraform output -raw fallback_lambda_function_name
 terraform output -raw grafana_instance_id
 ```
 
-## Lambda-Paket aktualisieren
+### Lambda-Paket aktualisieren
 
 Wenn Python-Code für Collector oder Fallback geändert wurde:
 
@@ -766,7 +813,7 @@ terraform apply
 
 Der Terraform-Plan zeigt dann typischerweise eine Änderung am `source_code_hash` der Lambdas.
 
-## Cloud-Smoke-Test
+### Cloud-Smoke-Test
 
 Collector-Token lokal aus SSM holen:
 
@@ -824,7 +871,7 @@ aws s3 ls \
   --profile iot-dev
 ```
 
-## Cloud-Fallback testen
+### Cloud-Fallback testen
 
 ```bash
 cd infra/dev
@@ -840,7 +887,7 @@ aws lambda invoke \
 cat /tmp/fallback-response.json | python3 -m json.tool
 ```
 
-## Grafana-Image deployen
+### Grafana-Image deployen
 
 Normalerweise übernimmt GitHub Actions den Build und Push des Grafana-Images:
 
@@ -874,7 +921,7 @@ export AWS_PROFILE=iot-dev
 ./scripts/cloud/restart-grafana-from-ecr.sh
 ```
 
-## Cloud-Grafana öffnen
+### Cloud-Grafana öffnen
 
 Grafana ist nicht öffentlich erreichbar. Zugriff erfolgt per SSM-Port-Forwarding:
 
@@ -901,7 +948,7 @@ Das Dashboard heißt:
 IoT-Wetterstation
 ```
 
-## Dev-Umgebung pausieren und fortsetzen
+### Dev-Umgebung pausieren und fortsetzen
 
 Für kurze Pausen kann die Infrastruktur stehen bleiben. Für Kostenkontrolle können RDS und EC2 gestoppt werden.
 
@@ -941,7 +988,7 @@ aws ec2 start-instances \
 
 Anschließend warten, bis RDS `available` und die EC2 per SSM `Online` ist. Danach den Grafana-Tunnel erneut öffnen.
 
-## Dev-Umgebung zerstören
+### Dev-Umgebung zerstören
 
 ```bash
 cd infra/dev
@@ -955,7 +1002,7 @@ Achtung: `terraform destroy` entfernt alle von `infra/dev` verwalteten Ressource
 
 Bootstrap sollte nicht routinemäßig zerstört werden, weil dort Remote State, Domain, ECR, OIDC und Budget liegen.
 
-# Sicherheit, Secrets und öffentlicher Betrieb des Projekts
+## Sicherheit, Secrets und öffentlicher Betrieb des Projekts
 
 Das Repository ist tauglich für den öffentlichen Zugriff, solange keine echten Secrets oder lokalen State-Dateien enthalten sind.
 
@@ -1001,7 +1048,7 @@ Live-Daten aus der eigenen AWS-Umgebung sind nicht automatisch für Dritte sicht
 
 Ein öffentliches Read-only-Grafana unter eigener Domain ist möglich, aber nicht Teil des aktuellen sicheren Dev-Standes.
 
-# Sample-Daten
+## Sample-Daten
 
 Noch nicht enthalten. Als nächster Portfolio-Schritt sollen bereinigte Sample-Daten aus S3 exportiert werden, damit Reviewer den Datenfluss auch ohne Zugriff auf die Live-AWS-Umgebung nachvollziehen können.
 
@@ -1016,7 +1063,7 @@ sample-data/
 
 Vor einem Export sollten die Raw-Payloads auf private Metadaten, exakte Koordinaten und sonstige sensible Informationen geprüft werden.
 
-# Warum diese Komponenten?
+## Warum diese Komponenten?
 
 | Komponente        | Zweck                                                        |
 | ----------------- | ------------------------------------------------------------ |
@@ -1035,7 +1082,7 @@ Vor einem Export sollten die Raw-Payloads auf private Metadaten, exakte Koordina
 | OpenWeather       | externe Referenz-/Fallback-Quelle bei Sensorausfall          |
 | Terraform         | reproduzierbare Infrastruktur                                |
 
-# Future Work
+## Future Work
 
 Mögliche spätere Erweiterungen:
 
