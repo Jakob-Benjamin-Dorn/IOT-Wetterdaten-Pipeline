@@ -1,1 +1,6 @@
-state_bucket_name = "iot-wetterdaten-pipeline-terraform-state-<dein-name-oder-suffix>"
+state_bucket_name  = "iot-wetterdaten-pipeline-terraform-state-<dein-name-oder-suffix>"
+budget_alert_email = "you@example.com"
+
+# Optional: stable sensor domain. Keep disabled for a generic fork.
+enable_sensor_domain = false
+sensor_domain_name   = ""

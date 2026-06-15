@@ -47,8 +47,3 @@ output "sensor_hosted_zone_id" {
   description = "Route53 hosted zone ID for the sensor domain."
   value       = var.enable_sensor_domain ? data.aws_route53_zone.sensor_domain[0].zone_id : null
 }
-
-output "stable_sensor_api_url" {
-  description = "Stable custom domain URL for sensor ingestion."
-  value       = data.terraform_remote_state.bootstrap.outputs.sensor_api_url
-}

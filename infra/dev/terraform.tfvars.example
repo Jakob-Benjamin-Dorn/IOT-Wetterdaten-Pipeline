@@ -1,6 +1,15 @@
 aws_region = "eu-central-1"
 
 # Must be globally unique across all AWS accounts.
-# Example:
-# raw_bucket_name = "iot-wetterdaten-pipeline-dev-raw-yourname"
 raw_bucket_name = "replace-with-globally-unique-bucket-name"
+
+# Local dev/demo values only. Do not commit real tfvars files.
+db_password            = "replace-with-db-password"
+grafana_admin_password = "replace-with-grafana-admin-password"
+
+# Runtime secrets for collector token and OpenWeather are read from SSM Parameter Store.
+# These defaults match infra/dev/variables.tf and can be overridden if needed.
+collector_token_parameter_name      = "/iot-wetterdaten-pipeline/dev/collector-token"
+openweather_api_key_parameter_name  = "/iot-wetterdaten-pipeline/dev/openweather-api-key"
+openweather_lat_parameter_name      = "/iot-wetterdaten-pipeline/dev/openweather-lat"
+openweather_lon_parameter_name      = "/iot-wetterdaten-pipeline/dev/openweather-lon"

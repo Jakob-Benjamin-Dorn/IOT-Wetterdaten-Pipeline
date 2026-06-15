@@ -67,3 +67,8 @@ output "github_actions_grafana_role_arn" {
   description = "IAM role ARN assumed by GitHub Actions to build, push and restart Grafana."
   value       = data.terraform_remote_state.bootstrap.outputs.github_actions_grafana_role_arn
 }
+
+output "stable_sensor_api_url" {
+  description = "Stable custom domain URL for sensor ingestion."
+  value       = data.terraform_remote_state.bootstrap.outputs.sensor_api_url
+}

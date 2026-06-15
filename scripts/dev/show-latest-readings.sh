@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-docker exec -it wetter-postgres psql -U weather -d weather -c "
+docker exec -i wetter-postgres psql -U weather -d weather -c "
 SELECT
   id,
   source,
