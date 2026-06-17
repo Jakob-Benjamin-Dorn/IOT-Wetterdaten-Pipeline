@@ -803,11 +803,15 @@ resource "aws_security_group" "vpc_endpoint" {
   vpc_id      = aws_vpc.dev.id
 
   ingress {
-    description     = "HTTPS from Lambda"
-    from_port       = 443
-    to_port         = 443
-    protocol        = "tcp"
-    security_groups = [aws_security_group.lambda.id]
+    description = "HTTPS from Lambda and Grafana EC2"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+
+    security_groups = [
+      aws_security_group.lambda.id,
+      aws_security_group.grafana.id
+    ]
   }
 
   egress {
