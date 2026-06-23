@@ -241,6 +241,9 @@ Noch nicht umgesetzt:
 
 ## Hardware
 
+![Hardware-Setup mit ESP32-C6-Zero und BME280](docs/images/hardware.jpg)
+*Hardware-Setup mit ESP32-C6-Zero und BME280, verbunden über Überbrückungskabel und Breadboard.*
+
 Board:
 
 ```text
