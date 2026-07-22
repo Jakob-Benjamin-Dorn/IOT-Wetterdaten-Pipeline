@@ -234,7 +234,47 @@ Noch nicht umgesetzt:
 
 ## Hardware
 
-Über ein Waveshare ESP32-C6-Zero-Board mit angeschlossenem BME280-Sensor werden Temperatur, Luftfeuchtigkeit und Luftdruck gemessen und übers WLAN per I²C Protokoll minütlich versendet. Das Intervall wird im ESP32-Sketch über `SEND_INTERVAL_MS` gesteuert.
+![Hardware-Setup mit ESP32-C6-Zero und BME280](docs/images/hardware.jpg)
+*Hardware-Setup mit ESP32-C6-Zero und BME280, verbunden über Überbrückungskabel und Breadboard.*
+
+Über ein Waveshare ESP32-C6-Zero-Board mit angeschlossenem BME280-Sensor werden Temperatur, Luftfeuchtigkeit und Luftdruck gemessen und übers WLAN per I²C-Protokoll versendet.
+
+Board:
+
+```text
+Waveshare ESP32-C6-Zero
+```
+
+Sensor:
+
+```text
+BME280
+```
+
+Gemessene Werte:
+
+```text
+Temperatur
+Luftfeuchtigkeit
+Luftdruck
+```
+
+Verbindung / Protokoll:
+
+```text
+I²C
+```
+
+Aktuell funktionierende Pins:
+
+```text
+SDA → GPIO 4 (Messwerte)
+SCL → GPIO 5 (Takt)
+VCC → 3V3 (Stromversorgung)
+GND → GND (Masse/Rückleiter)
+```
+
+Der Sensor sendet für die Demo typischerweise ungefähr alle 60 Sekunden. Das Intervall wird im ESP32-Sketch über `SEND_INTERVAL_MS` gesteuert.
 
 ## Erwartetes Sensor-JSON
 
