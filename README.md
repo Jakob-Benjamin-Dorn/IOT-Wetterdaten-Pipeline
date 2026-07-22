@@ -1,14 +1,18 @@
 # IoT-Wetterdaten-Pipeline
 
-[![CI](https://github.com/Jakob-Benjamin-Dorn/IOT-Wetterdaten-Pipeline/actions/workflows/tests.yml/badge.svg)](https://github.com/Jakob-Benjamin-Dorn/IOT-Wetterdaten-Pipeline/actions/workflows/tests.yml)
+[![Tests](https://github.com/Jakob-Benjamin-Dorn/IOT-Wetterdaten-Pipeline/actions/workflows/tests.yml/badge.svg)](https://github.com/Jakob-Benjamin-Dorn/IOT-Wetterdaten-Pipeline/actions/workflows/tests.yml)
+![Python](https://img.shields.io/badge/Python-3.13-3776AB?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-API-009688?logo=fastapi&logoColor=white)
+![Terraform](https://img.shields.io/badge/Terraform-%3E%3D%201.15-844FBA?logo=terraform&logoColor=white)
+![AWS](https://img.shields.io/badge/AWS-Cloud-232F3E?logo=amazonwebservices&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)
+![ESP32--C6](https://img.shields.io/badge/ESP32--C6-Hardware-E7352C?logo=espressif&logoColor=white)
 
-Dieses Projekt entstand aus der Frage, wie man eine echte, ausfallsichere IoT-Datenpipeline bauen kann, die sowohl lokal simulier- und testbar ist, als auch produktionsnah und ressourcen-effizient in der AWS-Cloud implementiert werden kann.
+Dieses Projekt entstand aus der Frage, wie man eine IoT-Datenpipeline bauen kann, die sowohl lokal simulier- und testbar ist, als auch produktionsnah und ressourcen-effizient in der AWS-Cloud implementiert werden kann.
 
 Hierfür misst ein ESP32-C6-Zero-Microcontroller mit angeschlossenem BME280-Sensor Temperatur, Luftfeuchtigkeit und Luftdruck und versendet über WLAN die Messwerte per HTTP. Im lokalen Setup nimmt ein FastAPI-Collector die Messwerte entgegen, speichert die Raw JSON S3-kompatibel in LocalStack und schreibt validierte Messwerte zusätzlich in PostgreSQL. Grafana visualisiert die Messwerte aus PostgreSQL.
 
 Im Cloud-Setup mit AWS ist derselbe fachliche Datenfluss als schlanke Serverless-/Dev-Architektur umgesetzt: der ESP32 sendet an eine stabile HTTPS-Domain, API-Gateway leitet an eine Lambda weiter, die Lambda validiert die Payload, prüft einen Header-Token, speichert den vollständige Raw-Payload in Amazon S3 und schreibt normalisierte Werte nach Amazon RDS PostgreSQL. Eine zweite Lambda wird per EventBridge Scheduler regelmäßig ausgeführt und schreibt bei veralteten Sensordaten OpenWeather-Fallback-Werte über denselben Collector-Pfad. Grafana läuft als eigenes Docker-Image aus Amazon Elastic Container Registry (ECR) auf einer EC2-Instanz und wird per SSM-Port-Forwarding geöffnet. Das Grafana-Image wird per GitHub Actions über OIDC nach ECR gepusht und die EC2 anschließend per SSM neu gestartet.
-
-Mir war dabei wichtig, nicht einfach möglichst viele Services zu verwenden, sondern bewusste Engineering-Entscheidungen zu treffen: einen nachvollziehbarer HTTP-Pfad statt sofort z.B. MQTT, Terraform statt "Klick"-Infrastruktur, OIDC statt langfristiger AWS Keys, SSM Parameter Store für die wichtigsten Runtime-Secrets und Kostenkontrolle statt unnötiger Dauerläufer.
 
 ![Grafana Dashboard mit Live-Wetterdaten](docs/images/grafana-dashboard.png)
 *Grafana-Dashboard mit Live-Daten des ESP32.*
@@ -30,35 +34,23 @@ Mir war dabei wichtig, nicht einfach möglichst viele Services zu verwenden, son
 
 ## Was ich damit zeigen wollte
 
-Dieses Projekt ist bewusst als kleines, aber vollständiges End-to-End-System gebaut. Es zeigt nicht nur einzelne Tools, sondern die Übergänge zwischen Hardware, lokaler Entwicklung, Cloud-Ingestion, Infrastruktur, Security und Visualisierung.
-
-Besonders wichtig waren mir:
-
-* **Reproduzierbarkeit:** Lokaler Stack per Docker Compose, Cloud-Infrastruktur per Terraform.
-* **Kostenbewusstsein:** Keine unnötigen NAT Gateways oder dauerhaft öffentlichen Demo-Services.
-* **Sicherheit im Dev-Kontext:** RDS privat, Grafana nicht öffentlich, GitHub Actions über OIDC, Secrets nicht im Repository.
-* **Portfolio-Tauglichkeit:** Der Datenfluss ist mit echten Live-Daten demonstrierbar, aber trotzdem so dokumentiert, dass andere das Projekt mit eigenen Daten nachbauen können.
+Dieses Projekt ist als kleines, aber vollständiges End-to-End-System gebaut. Es zeigt nicht nur den Einsatz einzelner Tools, sondern die Übergänge zwischen Hardware, lokaler Entwicklung, Cloud-Einspeisung, Infrastruktur, Sicherheit und Visualisierung. Wichtig waren dabei die Reproduzierbarkeit, sowohl im lokalen Stack mit Docker Compose als auch hinsichtlich der Cloud-Infrastruktur mit Terraform, Nachhaltigkeit bzw. Ressourceneffizienz und Sicherheit u.a. durch VPC-Subnetz, privates Grafana-Dashboard und GitHub Actions über OIDC.
 
 ## Architektur
 
 ### Lokaler Datenfluss
 
 ```mermaid
-graph TD
-    ESP[ESP32-C6-Zero + BME280] -->|HTTP POST| FastAPI[FastAPI Collector]
+flowchart TD
+    ESP["ESP32-C6-Zero + BME280"] -->|HTTP POST| FastAPI["FastAPI Collector"]
+    OW["Fallback<br/>OpenWeather API"] -.->|Fallback-Skript| FastAPI
+
     FastAPI -->|Raw JSON| S3[(LocalStack S3)]
     FastAPI -->|Validierte Daten| PG[(PostgreSQL)]
-    PG --> Grafana[Grafana Dashboard]
-```
+    PG --> Grafana["Grafana Dashboard"]
 
-Lokaler OpenWeather-Fallback:
-
-```mermaid
-graph TD
-    OW[OpenWeather API] -->|Fallback-Skript| FastAPI[FastAPI Collector]
-    FastAPI -->|Raw JSON| LocalS3[(LocalStack S3)]
-    FastAPI -->|validierte Messwerte| PG[(PostgreSQL)]
-    PG --> Grafana[Grafana Dashboard]
+    classDef fallback stroke-width:2px,stroke-dasharray:6 4
+    class OW fallback
 ```
 
 ### AWS-Datenfluss
@@ -101,9 +93,10 @@ Die Fallback-Lambda läuft bewusst ohne VPC-Anbindung, damit sie OpenWeather dir
 
 ## Architekturentscheidungen
 
-### HTTP statt direkt AWS IoT Core/MQTT
+### HTTP statt AWS IoT Core und MQTT
 
-AWS IoT Core und MQTT wären naheliegend für ein IoT-Projekt. Ich habe mich für diesen Stand trotzdem bewusst für HTTP entschieden, weil der Datenfluss dadurch einfacher zu debuggen und für ein Portfolio leichter nachvollziehbar ist. Der ESP32 sendet eine klare JSON-Payload, API Gateway schützt den Eingang, und die Lambda übernimmt Validierung und Speicherung. MQTT und Device-Zertifikate bleiben als spätere Ausbaustufe vorgesehen.
+AWS IoT Core und MQTT wären für ein IoT-Projekt naheliegende Technologien. Für den aktuellen Projektumfang habe ich mich dennoch bewusst für HTTP entschieden, da sich der Datenfluss damit einfacher nachvollziehen und debuggen lässt ohne unnötige Komplexität einzuführen. Zudem ist das Datenaufkommen derzeit gering: Ein einzelner Sensor sendet ungefähr einmal pro Minute eine kompakte JSON-Payload. Soll die Lösung später auf eine größere Anzahl von Geräten, häufigere Übertragungen oder bidirektionale Gerätekommunikation erweitert werden, wären AWS IoT Core, MQTT und gerätespezifische Zertifikate sinnvolle nächste Ausbaustufen.
+
 
 ### Raw-Daten in S3, normalisierte Daten in RDS
 
@@ -111,7 +104,7 @@ S3 dient als vollständiges Raw-Archiv. RDS PostgreSQL enthält nur die validier
 
 ### Fallback-Lambda ohne VPC
 
-Die Fallback-Lambda ruft OpenWeather auf und läuft bewusst außerhalb der VPC. So braucht sie keinen NAT Gateway. Die eigentliche Speicherung passiert anschließend wieder über den bestehenden Collector-Pfad. RDS bleibt damit privat, während der externe API-Aufruf kostengünstig und einfach bleibt.
+Die Fallback-Lambda ruft OpenWeather auf und läuft außerhalb der VPC. So braucht sie kein teures NAT Gateway. Die eigentliche Speicherung passiert anschließend wieder über den bestehenden Collector-Pfad. RDS bleibt damit privat, während der externe API-Aufruf kostengünstig und einfach bleibt.
 
 ### Grafana nicht öffentlich
 
@@ -241,42 +234,7 @@ Noch nicht umgesetzt:
 
 ## Hardware
 
-Board:
-
-```text
-Waveshare ESP32-C6-Zero
-```
-
-Sensor:
-
-```text
-BME280
-```
-
-Gemessene Werte:
-
-```text
-Temperatur
-Luftfeuchtigkeit
-Luftdruck
-```
-
-Verbindung / Protokoll:
-
-```text
-I²C
-```
-
-Aktuell funktionierende Pins:
-
-```text
-SDA → GPIO 4 (Messwerte)
-SCL → GPIO 5 (Takt)
-VCC → 3V3 (Stromversorgung)
-GND → GND (Masse/Rückleiter)
-```
-
-Der Sensor sendet für die Demo typischerweise ungefähr alle 60 Sekunden. Das Intervall wird im ESP32-Sketch über `SEND_INTERVAL_MS` gesteuert.
+Über ein Waveshare ESP32-C6-Zero-Board mit angeschlossenem BME280-Sensor werden Temperatur, Luftfeuchtigkeit und Luftdruck gemessen und übers WLAN per I²C Protokoll minütlich versendet. Das Intervall wird im ESP32-Sketch über `SEND_INTERVAL_MS` gesteuert.
 
 ## Erwartetes Sensor-JSON
 
@@ -291,7 +249,7 @@ Der Collector erwartet aktuell dieses Format:
 }
 ```
 
-Gültigkeitsbereiche:
+Plausibilisierung durch Gültigkeitsbereiche:
 
 ```text
 temperature_c: -20 bis 50
