@@ -192,7 +192,10 @@ resource "aws_db_instance" "postgres" {
 
   db_name  = var.db_name
   username = var.db_username
-  password = var.db_password
+
+  # RDS legt das Master-Passwort selbst in Secrets Manager ab und rotiert es.
+  # Es steht dadurch weder in der Konfiguration noch im Terraform-State.
+  manage_master_user_password = true
 
   db_subnet_group_name   = aws_db_subnet_group.postgres.name
   vpc_security_group_ids = [aws_security_group.rds.id]
@@ -572,11 +575,12 @@ resource "aws_lambda_function" "collector" {
       RAW_BUCKET                     = aws_s3_bucket.raw_weather_data.bucket
       COLLECTOR_TOKEN_PARAMETER_NAME = var.collector_token_parameter_name
 
-      POSTGRES_HOST     = aws_db_instance.postgres.address
-      POSTGRES_PORT     = "5432"
-      POSTGRES_DB       = var.db_name
-      POSTGRES_USER     = var.db_username
-      POSTGRES_PASSWORD = var.db_password
+      POSTGRES_HOST = aws_db_instance.postgres.address
+      POSTGRES_PORT = "5432"
+      POSTGRES_DB   = var.db_name
+
+      # Benutzername und Passwort liest die Lambda zur Laufzeit aus diesem Secret.
+      DB_SECRET_ARN = aws_db_instance.postgres.master_user_secret[0].secret_arn
     }
   }
 
@@ -584,7 +588,8 @@ resource "aws_lambda_function" "collector" {
     aws_iam_role_policy_attachment.collector_lambda_basic_execution,
     aws_iam_role_policy_attachment.collector_lambda_vpc_access,
     aws_iam_role_policy.collector_lambda_s3_write,
-    aws_iam_role_policy.collector_lambda_ssm_read
+    aws_iam_role_policy.collector_lambda_ssm_read,
+    aws_iam_role_policy.collector_lambda_db_secret_read
   ]
 
   tags = local.common_tags
@@ -818,6 +823,26 @@ resource "aws_iam_role_policy" "collector_lambda_ssm_read" {
   })
 }
 
+resource "aws_iam_role_policy" "collector_lambda_db_secret_read" {
+  name = "${var.project_name}-${var.environment}-collector-db-secret-read"
+  role = aws_iam_role.collector_lambda.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "secretsmanager:GetSecretValue"
+        ]
+        Resource = [
+          aws_db_instance.postgres.master_user_secret[0].secret_arn
+        ]
+      }
+    ]
+  })
+}
+
 resource "aws_iam_role_policy" "fallback_lambda_ssm_read" {
   name = "${var.project_name}-${var.environment}-fallback-ssm-read"
   role = aws_iam_role.fallback_lambda.id
@@ -881,5 +906,18 @@ resource "aws_vpc_endpoint" "ssm" {
 
   tags = merge(local.common_tags, {
     Name = "${var.project_name}-${var.environment}-ssm-endpoint"
+  })
+}
+
+resource "aws_vpc_endpoint" "secretsmanager" {
+  vpc_id              = aws_vpc.dev.id
+  service_name        = "com.amazonaws.${var.aws_region}.secretsmanager"
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = [aws_subnet.private_a.id, aws_subnet.private_b.id]
+  security_group_ids  = [aws_security_group.vpc_endpoint.id]
+  private_dns_enabled = true
+
+  tags = merge(local.common_tags, {
+    Name = "${var.project_name}-${var.environment}-secretsmanager-endpoint"
   })
 }

@@ -3,8 +3,8 @@ aws_region = "eu-central-1"
 # Must be globally unique across all AWS accounts.
 raw_bucket_name = "replace-with-globally-unique-bucket-name"
 
-# Local dev/demo values only. Do not commit real tfvars files.
-db_password = "replace-with-db-password"
+# Das RDS-Master-Passwort verwaltet RDS selbst (Secrets Manager) und wird hier
+# nicht gesetzt. Do not commit real tfvars files.
 
 # Runtime secrets (Collector-Token, OpenWeather, Grafana-Passwörter) liegen in SSM Parameter Store.
 # These defaults match infra/dev/variables.tf and can be overridden if needed.

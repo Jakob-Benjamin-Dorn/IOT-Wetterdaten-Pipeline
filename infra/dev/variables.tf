@@ -33,12 +33,6 @@ variable "db_username" {
   default     = "weather"
 }
 
-variable "db_password" {
-  description = "PostgreSQL admin password."
-  type        = string
-  sensitive   = true
-}
-
 variable "grafana_db_username" {
   description = "Read-only PostgreSQL user that Grafana uses (created with database/grafana_reader.sql)."
   type        = string

@@ -38,6 +38,11 @@ output "postgres_username" {
   value       = aws_db_instance.postgres.username
 }
 
+output "postgres_master_secret_arn" {
+  description = "ARN of the Secrets Manager secret holding the RDS master credentials."
+  value       = aws_db_instance.postgres.master_user_secret[0].secret_arn
+}
+
 output "grafana_instance_id" {
   description = "EC2 instance ID for the private Grafana instance."
   value       = aws_instance.grafana.id
