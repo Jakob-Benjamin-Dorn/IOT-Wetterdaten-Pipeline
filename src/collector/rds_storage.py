@@ -4,6 +4,7 @@ from datetime import datetime
 import psycopg
 
 from src.collector.config import get_settings
+from src.collector.db_credentials import get_db_credentials
 from src.collector.exceptions import CollectorStorageError
 
 
@@ -19,17 +20,35 @@ class NormalizedReading:
     raw_s3_key: str
 
 
-def get_connection_string() -> str:
+def get_connection_kwargs(*, force_refresh: bool = False) -> dict[str, str | int]:
     settings = get_settings()
+    credentials = get_db_credentials(settings, force_refresh=force_refresh)
 
+    return {
+        "host": settings.postgres_host,
+        "port": settings.postgres_port,
+        "dbname": settings.postgres_db,
+        "user": credentials.user,
+        "password": credentials.password,
+        "connect_timeout": 5,
+    }
+
+
+def is_authentication_failure(exc: psycopg.Error) -> bool:
     return (
-        f"host={settings.postgres_host} "
-        f"port={settings.postgres_port} "
-        f"dbname={settings.postgres_db} "
-        f"user={settings.postgres_user} "
-        f"password={settings.postgres_password} "
-        f"connect_timeout=5"
+        getattr(exc, "sqlstate", None) == "28P01"
+        or "password authentication failed" in str(exc)
     )
+
+
+def connect():
+    """Open a connection; retry once with fresh credentials after a rotation."""
+    try:
+        return psycopg.connect(**get_connection_kwargs())
+    except psycopg.OperationalError as exc:
+        if get_settings().db_secret_arn and is_authentication_failure(exc):
+            return psycopg.connect(**get_connection_kwargs(force_refresh=True))
+        raise
 
 
 def ensure_schema_exists(conn) -> None:
@@ -72,7 +91,7 @@ def ensure_schema_exists(conn) -> None:
 
 def insert_normalized_reading(reading: NormalizedReading) -> None:
     try:
-        with psycopg.connect(get_connection_string()) as conn:
+        with connect() as conn:
             ensure_schema_exists(conn)
 
             with conn.cursor() as cur:
@@ -112,7 +131,7 @@ def get_latest_readings(limit: int = 10, source: str | None = None) -> list[dict
     safe_limit = max(1, min(limit, 100))
 
     try:
-        with psycopg.connect(get_connection_string()) as conn:
+        with connect() as conn:
             ensure_schema_exists(conn)
 
             with conn.cursor() as cur:

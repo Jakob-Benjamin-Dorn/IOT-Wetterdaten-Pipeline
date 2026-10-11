@@ -14,6 +14,7 @@ class Settings:
     postgres_db: str
     postgres_user: str
     postgres_password: str
+    db_secret_arn: str | None
 
     fallback_threshold_seconds: int
     fallback_check_interval_seconds: int
@@ -37,6 +38,7 @@ def load_settings() -> Settings:
         postgres_db=os.getenv("POSTGRES_DB", "weather"),
         postgres_user=os.getenv("POSTGRES_USER", "weather"),
         postgres_password=os.getenv("POSTGRES_PASSWORD", "weather"),
+        db_secret_arn=optional_env("DB_SECRET_ARN"),
 
         fallback_threshold_seconds=int(os.getenv("FALLBACK_THRESHOLD_SECONDS", "120")),
         fallback_check_interval_seconds=int(os.getenv("FALLBACK_CHECK_INTERVAL_SECONDS", "60")),
