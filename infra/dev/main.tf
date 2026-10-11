@@ -6,6 +6,9 @@ locals {
   }
 
   lambda_package_path = "${path.module}/../../build/lambda/collector-lambda.zip"
+
+  grafana_admin_password_parameter_arn = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter${var.grafana_admin_password_parameter_name}"
+  grafana_db_password_parameter_arn    = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter${var.grafana_db_password_parameter_name}"
 }
 
 resource "aws_s3_bucket" "raw_weather_data" {
@@ -189,7 +192,10 @@ resource "aws_db_instance" "postgres" {
 
   db_name  = var.db_name
   username = var.db_username
-  password = var.db_password
+
+  # RDS legt das Master-Passwort selbst in Secrets Manager ab und rotiert es.
+  # Es steht dadurch weder in der Konfiguration noch im Terraform-State.
+  manage_master_user_password = true
 
   db_subnet_group_name   = aws_db_subnet_group.postgres.name
   vpc_security_group_ids = [aws_security_group.rds.id]
@@ -329,6 +335,13 @@ resource "aws_instance" "grafana" {
   vpc_security_group_ids = [aws_security_group.grafana.id]
   iam_instance_profile   = aws_iam_instance_profile.grafana_ec2.name
 
+  # IMDSv2 erzwingen; hop limit 1 hält Container auf dem Host vom Metadata-Dienst fern.
+  metadata_options {
+    http_endpoint               = "enabled"
+    http_tokens                 = "required"
+    http_put_response_hop_limit = 1
+  }
+
   user_data_replace_on_change = true
 
   user_data = <<-EOF
@@ -365,9 +378,11 @@ resource "aws_instance" "grafana" {
         type: postgres
         access: proxy
         url: ${aws_db_instance.postgres.address}:5432
-        user: ${var.db_username}
+        user: ${var.grafana_db_username}
         secureJsonData:
-          password: ${var.db_password}
+          # Grafana ersetzt $GRAFANA_DB_PASSWORD beim Laden aus der Umgebung des
+          # Containers; run-grafana.sh liest den Wert aus SSM.
+          password: $GRAFANA_DB_PASSWORD
         jsonData:
           database: ${var.db_name}
           sslmode: require
@@ -387,6 +402,22 @@ resource "aws_instance" "grafana" {
 
     docker rm -f grafana || true
 
+    # Die Passwörter liegen als SecureString in SSM und stehen nicht im user_data.
+    # set +x verhindert, dass sie über das Shell-Tracing in die Logs gelangen.
+    set +x
+    GRAFANA_ADMIN_PASSWORD="$(aws ssm get-parameter \
+      --region ${var.aws_region} \
+      --name '${var.grafana_admin_password_parameter_name}' \
+      --with-decryption \
+      --query Parameter.Value \
+      --output text)"
+    GRAFANA_DB_PASSWORD="$(aws ssm get-parameter \
+      --region ${var.aws_region} \
+      --name '${var.grafana_db_password_parameter_name}' \
+      --with-decryption \
+      --query Parameter.Value \
+      --output text)"
+
     docker run -d \
       --name grafana \
       --restart unless-stopped \
@@ -394,7 +425,8 @@ resource "aws_instance" "grafana" {
       -v grafana-data:/var/lib/grafana \
       -v /opt/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro \
       -e GF_SECURITY_ADMIN_USER=admin \
-      -e GF_SECURITY_ADMIN_PASSWORD='${var.grafana_admin_password}' \
+      -e GF_SECURITY_ADMIN_PASSWORD="$GRAFANA_ADMIN_PASSWORD" \
+      -e GRAFANA_DB_PASSWORD="$GRAFANA_DB_PASSWORD" \
       -e GF_USERS_ALLOW_SIGN_UP=false \
       -e GF_AUTH_ANONYMOUS_ENABLED=false \
       "$IMAGE_URI"
@@ -419,7 +451,8 @@ resource "aws_instance" "grafana" {
   EOF
 
   depends_on = [
-    aws_iam_role_policy.grafana_ec2_ecr_pull
+    aws_iam_role_policy.grafana_ec2_ecr_pull,
+    aws_iam_role_policy.grafana_ec2_ssm_read
   ]
 
   tags = merge(
@@ -452,6 +485,27 @@ resource "aws_iam_role_policy" "grafana_ec2_ecr_pull" {
           "ecr:GetDownloadUrlForLayer"
         ]
         Resource = data.terraform_remote_state.bootstrap.outputs.grafana_ecr_repository_arn
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy" "grafana_ec2_ssm_read" {
+  name = "${var.project_name}-${var.environment}-grafana-ssm-read"
+  role = aws_iam_role.grafana_ec2.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "ssm:GetParameter"
+        ]
+        Resource = [
+          local.grafana_admin_password_parameter_arn,
+          local.grafana_db_password_parameter_arn
+        ]
       }
     ]
   })
@@ -528,11 +582,12 @@ resource "aws_lambda_function" "collector" {
       RAW_BUCKET                     = aws_s3_bucket.raw_weather_data.bucket
       COLLECTOR_TOKEN_PARAMETER_NAME = var.collector_token_parameter_name
 
-      POSTGRES_HOST     = aws_db_instance.postgres.address
-      POSTGRES_PORT     = "5432"
-      POSTGRES_DB       = var.db_name
-      POSTGRES_USER     = var.db_username
-      POSTGRES_PASSWORD = var.db_password
+      POSTGRES_HOST = aws_db_instance.postgres.address
+      POSTGRES_PORT = "5432"
+      POSTGRES_DB   = var.db_name
+
+      # Benutzername und Passwort liest die Lambda zur Laufzeit aus diesem Secret.
+      DB_SECRET_ARN = aws_db_instance.postgres.master_user_secret[0].secret_arn
     }
   }
 
@@ -540,7 +595,8 @@ resource "aws_lambda_function" "collector" {
     aws_iam_role_policy_attachment.collector_lambda_basic_execution,
     aws_iam_role_policy_attachment.collector_lambda_vpc_access,
     aws_iam_role_policy.collector_lambda_s3_write,
-    aws_iam_role_policy.collector_lambda_ssm_read
+    aws_iam_role_policy.collector_lambda_ssm_read,
+    aws_iam_role_policy.collector_lambda_db_secret_read
   ]
 
   tags = local.common_tags
@@ -774,6 +830,26 @@ resource "aws_iam_role_policy" "collector_lambda_ssm_read" {
   })
 }
 
+resource "aws_iam_role_policy" "collector_lambda_db_secret_read" {
+  name = "${var.project_name}-${var.environment}-collector-db-secret-read"
+  role = aws_iam_role.collector_lambda.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "secretsmanager:GetSecretValue"
+        ]
+        Resource = [
+          aws_db_instance.postgres.master_user_secret[0].secret_arn
+        ]
+      }
+    ]
+  })
+}
+
 resource "aws_iam_role_policy" "fallback_lambda_ssm_read" {
   name = "${var.project_name}-${var.environment}-fallback-ssm-read"
   role = aws_iam_role.fallback_lambda.id
@@ -837,5 +913,18 @@ resource "aws_vpc_endpoint" "ssm" {
 
   tags = merge(local.common_tags, {
     Name = "${var.project_name}-${var.environment}-ssm-endpoint"
+  })
+}
+
+resource "aws_vpc_endpoint" "secretsmanager" {
+  vpc_id              = aws_vpc.dev.id
+  service_name        = "com.amazonaws.${var.aws_region}.secretsmanager"
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = [aws_subnet.private_a.id, aws_subnet.private_b.id]
+  security_group_ids  = [aws_security_group.vpc_endpoint.id]
+  private_dns_enabled = true
+
+  tags = merge(local.common_tags, {
+    Name = "${var.project_name}-${var.environment}-secretsmanager-endpoint"
   })
 }

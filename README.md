@@ -17,6 +17,8 @@ Im Cloud-Setup mit AWS ist derselbe fachliche Datenfluss als schlanke Serverless
 ![Grafana Dashboard mit Live-Wetterdaten](docs/images/grafana-dashboard.png)
 *Grafana-Dashboard mit Live-Daten des ESP32.*
 
+> **Status:** Die AWS-Umgebung ist aktuell abgebaut, um laufende Kosten zu vermeiden. Der Code und die Terraform-Konfiguration sind unverändert nutzbar; die Cloud-Umgebung lässt sich mit den Schritten unter [Dev-Infrastruktur](#dev-infrastruktur) wieder aufbauen. Lokal läuft der komplette Stack weiterhin per Docker Compose.
+
 ## Highlights & Kurzüberblick
 
 * echter ESP32-C6-Zero mit BME280 als Datenquelle
@@ -130,6 +132,8 @@ Einige Teile des Projekts wirkten in der Theorie einfacher, als sie es in der Um
 
 * Terraform soll die Secret-Werte nicht selbst in Parameter Store schreiben, weil sie sonst wieder im State landen können. Deshalb verwaltet Terraform nur Parameternamen, IAM-Rechte und Lambda-Environment-Variablen mit Parameternamen; die eigentlichen Werte werden separat gesetzt.
 
+* Auch Datenbank- und Grafana-Passwörter sollten nicht als Terraform-Variablen im State, in Lambda-Umgebungsvariablen oder im EC2-`user_data` landen. Das RDS-Master-Passwort verwaltet deshalb RDS selbst in Secrets Manager (`manage_master_user_password`); die Collector-Lambda liest es zur Laufzeit und holt es nach einer Rotation neu. Grafana arbeitet nicht mit dem Master-Benutzer, sondern mit einem eigenen Lese-Benutzer, dessen Passwort wie das Grafana-Admin-Passwort in SSM Parameter Store liegt und erst beim Start des Containers gelesen wird.
+
 
 ## Repository-Struktur
 
@@ -220,13 +224,13 @@ Bereits umgesetzt:
 * ECR, GitHub OIDC, Budget und Domain gehören zur Bootstrap-Infrastruktur.
 * API Gateway Throttling und Lambda Reserved Concurrency sind als Kosten-/Missbrauchsschutz gesetzt.
 * Collector-Token und OpenWeather-Konfiguration liegen in SSM Parameter Store; Terraform verwaltet nur Parameternamen und IAM-Rechte.
+* RDS-Master-Passwort wird von RDS in Secrets Manager verwaltet; Grafana nutzt einen Lese-Benutzer mit Passwort aus SSM. Es gibt keine Passwörter mehr in Terraform-Variablen oder im State.
 * Der ESP32-Sketch enthält einfache Recovery-Logik für WLAN-/HTTP-Ausfälle.
 
 Noch nicht umgesetzt:
 
 * Quarantine-Ablage für ungültige oder unerwartete Payloads
 * öffentliches Read-only-Grafana oder statischer Demo-Zugriff über `grafana.<domain>`
-* vollständige Verlagerung von RDS- und Grafana-Passwörtern in Secrets Manager oder Parameter Store
 * GitHub Actions für On-Demand-Aufbau und Zerstörung der gesamten Dev-Infrastruktur
 * Export bereinigter Sample-Daten aus S3 für Reviewer ohne Zugriff auf die Live-Cloud
 * Rebuild-Skript, das normalisierte RDS-Daten aus S3 Raw-Daten wiederherstellt
@@ -683,25 +687,20 @@ Dev enthält:
 * RDS PostgreSQL
 * EC2-Instanz für Grafana
 * IAM-Rollen und Policies
-* VPC Interface Endpoint für SSM Parameter Store Zugriff aus der Collector-Lambda
+* VPC Interface Endpoints für SSM Parameter Store und Secrets Manager (Zugriff aus der Collector-Lambda)
 
-Vor `terraform plan/apply` müssen die noch lokal verwalteten Secrets als Terraform-Variablen gesetzt sein. Aktuell betrifft das insbesondere RDS- und Grafana-Passwörter:
+Passwörter werden nicht als Terraform-Variablen übergeben:
 
-```bash
-cd infra/dev
-export AWS_PROFILE=iot-dev
-
-export TF_VAR_db_password="<rds-password>"
-export TF_VAR_grafana_admin_password="<grafana-admin-password>"
-```
-
-Collector-Token und OpenWeather-Konfiguration liegen in SSM Parameter Store. Terraform braucht dafür nur die Parameternamen. Die Default-Namen sind:
+* Das RDS-Master-Passwort erzeugt und verwaltet RDS selbst in Secrets Manager. Die Collector-Lambda bekommt nur die Secret-ARN (`DB_SECRET_ARN`) und liest Benutzer und Passwort zur Laufzeit.
+* Collector-Token, OpenWeather-Konfiguration sowie Grafana-Admin- und Grafana-Datenbank-Passwort liegen in SSM Parameter Store. Terraform braucht dafür nur die Parameternamen. Die Default-Namen sind:
 
 ```text
 /iot-wetterdaten-pipeline/dev/collector-token
 /iot-wetterdaten-pipeline/dev/openweather-api-key
 /iot-wetterdaten-pipeline/dev/openweather-lat
 /iot-wetterdaten-pipeline/dev/openweather-lon
+/iot-wetterdaten-pipeline/dev/grafana-admin-password
+/iot-wetterdaten-pipeline/dev/grafana-db-password
 ```
 
 Parameter bei Bedarf setzen oder aktualisieren:
@@ -736,6 +735,22 @@ aws ssm put-parameter \
   --profile iot-dev
 ```
 
+Die beiden Grafana-Passwörter sollten nur aus Buchstaben und Ziffern bestehen, weil Grafana das Datenbank-Passwort in die Datasource-Konfiguration einsetzt. Sie müssen vor dem ersten Start der Grafana-Instanz existieren:
+
+```bash
+aws ssm put-parameter \
+  --name "/iot-wetterdaten-pipeline/dev/grafana-admin-password" \
+  --type "SecureString" \
+  --value "$(openssl rand -hex 24)" \
+  --profile iot-dev
+
+aws ssm put-parameter \
+  --name "/iot-wetterdaten-pipeline/dev/grafana-db-password" \
+  --type "SecureString" \
+  --value "$(openssl rand -hex 24)" \
+  --profile iot-dev
+```
+
 Deployment der Dev-Infrastruktur:
 
 ```bash
@@ -757,7 +772,39 @@ terraform output -raw stable_sensor_api_url
 terraform output -raw raw_bucket_name
 terraform output -raw fallback_lambda_function_name
 terraform output -raw grafana_instance_id
+terraform output -raw postgres_master_secret_arn
 ```
+
+### Lese-Benutzer für Grafana anlegen
+
+Nach dem ersten `terraform apply` existiert die Datenbank, aber noch nicht der Benutzer, mit dem Grafana liest. Er wird einmalig mit dem RDS-Master-Benutzer angelegt. RDS liegt in privaten Subnets und ist deshalb nur über die Grafana-Instanz erreichbar. Per SSM-Port-Forwarding lässt sich `psql` lokal nutzen:
+
+```bash
+cd infra/dev
+export AWS_PROFILE=iot-dev
+
+# Terminal 1: Tunnel zu RDS über die Grafana-Instanz
+aws ssm start-session \
+  --target "$(terraform output -raw grafana_instance_id)" \
+  --document-name AWS-StartPortForwardingSessionToRemoteHost \
+  --parameters "{\"host\":[\"$(terraform output -raw postgres_endpoint)\"],\"portNumber\":[\"5432\"],\"localPortNumber\":[\"15432\"]}"
+
+# Terminal 2: Master-Zugangsdaten aus Secrets Manager holen und Skript ausführen
+SECRET="$(aws secretsmanager get-secret-value \
+  --secret-id "$(terraform output -raw postgres_master_secret_arn)" \
+  --query SecretString --output text)"
+export PGUSER="$(echo "$SECRET" | python3 -c 'import json,sys; print(json.load(sys.stdin)["username"])')"
+export PGPASSWORD="$(echo "$SECRET" | python3 -c 'import json,sys; print(json.load(sys.stdin)["password"])')"
+
+psql "host=localhost port=15432 dbname=weather sslmode=require" \
+  -v grafana_user=grafana_reader \
+  -v grafana_password="$(aws ssm get-parameter \
+      --name /iot-wetterdaten-pipeline/dev/grafana-db-password \
+      --with-decryption --query Parameter.Value --output text)" \
+  -f ../../database/grafana_reader.sql
+```
+
+Das Skript `database/grafana_reader.sql` ist idempotent: Es legt den Benutzer `grafana_reader` an (oder setzt dessen Passwort neu) und vergibt nur `SELECT` auf die Tabellen im Schema `public`. Die Tabelle `weather_readings` legt die Collector-Lambda beim ersten Schreibzugriff an; die Rechte gelten über `ALTER DEFAULT PRIVILEGES` auch für später angelegte Tabellen. Grafana verbindet sich erst bei der ersten Abfrage mit der Datenbank, ein Neustart der Instanz ist danach nicht nötig.
 
 ### Lambda-Paket aktualisieren
 
@@ -995,13 +1042,19 @@ SSM Parameter Store:
 - Collector Token
 - OpenWeather API Key
 - OpenWeather Lat/Lon
-
-Terraform-Variablen lokal:
-- RDS Passwort
 - Grafana Admin Passwort
+- Passwort des Grafana-Lese-Benutzers
+
+Secrets Manager (von RDS verwaltet, wird automatisch rotiert):
+- RDS Master Benutzer und Passwort
+
+Terraform-Variablen:
+- keine Passwörter
 ```
 
-Terraform verwaltet für Parameter Store nur die Parameternamen, IAM-Rechte und Lambda-Environment-Variablen mit Parameternamen. Die Secret-Werte selbst werden per AWS CLI oder Konsole gesetzt und sollen nicht im Terraform-State landen.
+Terraform verwaltet für Parameter Store nur die Parameternamen, IAM-Rechte und Lambda-Environment-Variablen mit Parameternamen. Die Secret-Werte selbst werden per AWS CLI oder Konsole gesetzt und stehen weder im Terraform-State noch im `user_data` der Grafana-Instanz. Die Collector-Lambda cached die Datenbank-Zugangsdaten fünf Minuten und liest sie nach einem fehlgeschlagenen Login einmal neu, damit die Rotation des Master-Passworts keinen Ausfall verursacht. Die Grafana-Instanz erzwingt IMDSv2.
+
+Bekannte Einschränkung: Der ESP32-Sketch prüft das TLS-Zertifikat des Endpunkts noch nicht (`setInsecure()`); dafür wäre ein Root-Zertifikat im Sketch und eine NTP-Zeitsynchronisation nötig.
 
 GitHub Actions verwendet OIDC statt langfristiger AWS Access Keys. Die vorhandene GitHub-OIDC-Rolle ist auf das Grafana-Deployment beschränkt. Ein späterer Terraform-Deploy/Destroy-Workflow sollte eine separate, enger geprüfte Rolle und GitHub Environment Approval verwenden.
 
@@ -1051,8 +1104,6 @@ Mögliche spätere Erweiterungen:
 * On-Demand GitHub Actions für `infra/dev` Plan/Apply/Destroy mit Environment Approval
 * öffentliches Read-only-Grafana oder statischer Demo-Zugang unter eigener Subdomain
 * Quarantine-Prefix oder Quarantine-Bucket für ungültige Payloads
-* vollständige Verlagerung von RDS- und Grafana-Passwörtern in Secrets Manager oder Parameter Store
-* RDS-managed Master Password oder Secrets Manager Integration prüfen
 * Rebuild-Skript, das normalisierte RDS-Daten aus S3 Raw-Daten wiederherstellt
 * S3 Lifecycle Rules für Raw-Daten
 * optionaler späterer Wechsel von EC2 zu ECS/Fargate oder ALB/CloudFront für eine öffentliche Demo
