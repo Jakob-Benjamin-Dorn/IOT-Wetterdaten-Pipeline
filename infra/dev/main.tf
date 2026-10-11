@@ -335,6 +335,13 @@ resource "aws_instance" "grafana" {
   vpc_security_group_ids = [aws_security_group.grafana.id]
   iam_instance_profile   = aws_iam_instance_profile.grafana_ec2.name
 
+  # IMDSv2 erzwingen; hop limit 1 hält Container auf dem Host vom Metadata-Dienst fern.
+  metadata_options {
+    http_endpoint               = "enabled"
+    http_tokens                 = "required"
+    http_put_response_hop_limit = 1
+  }
+
   user_data_replace_on_change = true
 
   user_data = <<-EOF
