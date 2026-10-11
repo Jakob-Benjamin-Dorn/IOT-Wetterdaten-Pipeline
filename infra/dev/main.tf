@@ -6,6 +6,9 @@ locals {
   }
 
   lambda_package_path = "${path.module}/../../build/lambda/collector-lambda.zip"
+
+  grafana_admin_password_parameter_arn = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter${var.grafana_admin_password_parameter_name}"
+  grafana_db_password_parameter_arn    = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter${var.grafana_db_password_parameter_name}"
 }
 
 resource "aws_s3_bucket" "raw_weather_data" {
@@ -365,9 +368,11 @@ resource "aws_instance" "grafana" {
         type: postgres
         access: proxy
         url: ${aws_db_instance.postgres.address}:5432
-        user: ${var.db_username}
+        user: ${var.grafana_db_username}
         secureJsonData:
-          password: ${var.db_password}
+          # Grafana ersetzt $GRAFANA_DB_PASSWORD beim Laden aus der Umgebung des
+          # Containers; run-grafana.sh liest den Wert aus SSM.
+          password: $GRAFANA_DB_PASSWORD
         jsonData:
           database: ${var.db_name}
           sslmode: require
@@ -387,6 +392,22 @@ resource "aws_instance" "grafana" {
 
     docker rm -f grafana || true
 
+    # Die Passwörter liegen als SecureString in SSM und stehen nicht im user_data.
+    # set +x verhindert, dass sie über das Shell-Tracing in die Logs gelangen.
+    set +x
+    GRAFANA_ADMIN_PASSWORD="$(aws ssm get-parameter \
+      --region ${var.aws_region} \
+      --name '${var.grafana_admin_password_parameter_name}' \
+      --with-decryption \
+      --query Parameter.Value \
+      --output text)"
+    GRAFANA_DB_PASSWORD="$(aws ssm get-parameter \
+      --region ${var.aws_region} \
+      --name '${var.grafana_db_password_parameter_name}' \
+      --with-decryption \
+      --query Parameter.Value \
+      --output text)"
+
     docker run -d \
       --name grafana \
       --restart unless-stopped \
@@ -394,7 +415,8 @@ resource "aws_instance" "grafana" {
       -v grafana-data:/var/lib/grafana \
       -v /opt/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro \
       -e GF_SECURITY_ADMIN_USER=admin \
-      -e GF_SECURITY_ADMIN_PASSWORD='${var.grafana_admin_password}' \
+      -e GF_SECURITY_ADMIN_PASSWORD="$GRAFANA_ADMIN_PASSWORD" \
+      -e GRAFANA_DB_PASSWORD="$GRAFANA_DB_PASSWORD" \
       -e GF_USERS_ALLOW_SIGN_UP=false \
       -e GF_AUTH_ANONYMOUS_ENABLED=false \
       "$IMAGE_URI"
@@ -419,7 +441,8 @@ resource "aws_instance" "grafana" {
   EOF
 
   depends_on = [
-    aws_iam_role_policy.grafana_ec2_ecr_pull
+    aws_iam_role_policy.grafana_ec2_ecr_pull,
+    aws_iam_role_policy.grafana_ec2_ssm_read
   ]
 
   tags = merge(
@@ -452,6 +475,27 @@ resource "aws_iam_role_policy" "grafana_ec2_ecr_pull" {
           "ecr:GetDownloadUrlForLayer"
         ]
         Resource = data.terraform_remote_state.bootstrap.outputs.grafana_ecr_repository_arn
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy" "grafana_ec2_ssm_read" {
+  name = "${var.project_name}-${var.environment}-grafana-ssm-read"
+  role = aws_iam_role.grafana_ec2.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "ssm:GetParameter"
+        ]
+        Resource = [
+          local.grafana_admin_password_parameter_arn,
+          local.grafana_db_password_parameter_arn
+        ]
       }
     ]
   })

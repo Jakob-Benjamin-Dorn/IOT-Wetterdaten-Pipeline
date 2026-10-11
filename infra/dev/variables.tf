@@ -39,10 +39,22 @@ variable "db_password" {
   sensitive   = true
 }
 
-variable "grafana_admin_password" {
-  description = "Admin password for the dev Grafana instance."
+variable "grafana_db_username" {
+  description = "Read-only PostgreSQL user that Grafana uses (created with database/grafana_reader.sql)."
   type        = string
-  sensitive   = true
+  default     = "grafana_reader"
+}
+
+variable "grafana_admin_password_parameter_name" {
+  description = "SSM SecureString parameter holding the Grafana admin password."
+  type        = string
+  default     = "/iot-wetterdaten-pipeline/dev/grafana-admin-password"
+}
+
+variable "grafana_db_password_parameter_name" {
+  description = "SSM SecureString parameter holding the password of the read-only Grafana database user."
+  type        = string
+  default     = "/iot-wetterdaten-pipeline/dev/grafana-db-password"
 }
 
 variable "openweather_location" {
